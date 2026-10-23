@@ -91,6 +91,36 @@ export interface DCTMetrics {
   mean_block_energy: number;
 }
 
+export interface SuspiciousRegion {
+  bbox: [number, number, number, number];
+  relative_suspicion: number;
+  label: string;
+}
+
+export interface ExplainabilityHeatmapResponse {
+  success: boolean;
+  methodology: string;
+  heatmap_b64: string;
+  overlay_b64: string;
+  min_intensity: number;
+  max_intensity: number;
+  mean_intensity: number;
+  top_regions: SuspiciousRegion[];
+}
+
+export interface LiveShieldFrameResponse {
+  timestamp: number;
+  fps_estimate: number;
+  face_detected: boolean;
+  face_box: [number, number, number, number] | null;
+  synthetic_confidence: number;
+  rppg_pulse_estimate: number | null;
+  blood_volume_variance: number;
+  temporal_consistency: number;
+  verdict: "LIVE_AUTHENTIC_STREAM" | "DEEPFAKE_INJECTION_DETECTED" | "NO_FACE_IN_FRAME" | "INSUFFICIENT_LIGHTING";
+  suspicion_flags: string[];
+}
+
 export interface DCTForensicResult {
   status: string;
   metrics?: DCTMetrics;
@@ -298,6 +328,82 @@ export interface SynthIDProvenanceResult {
   audit_notes: string[];
 }
 
+export interface CornealReflectionsResult {
+  status: string;
+  faces_detected: number;
+  eyes_detected: number;
+  specular_symmetry_score: number;
+  pupil_circularity_score: number;
+  verdict: string;
+  analysis_notes: string;
+  annotated_overlay_url?: string | null;
+}
+
+export interface ReverseLookupLinks {
+  google_lens?: string;
+  tineye?: string;
+  bing_visual?: string;
+  yandex_images?: string;
+}
+
+export interface PerceptualHashResult {
+  phash: string;
+  dhash?: string;
+  ahash?: string;
+  bit_length?: number;
+  reverse_lookup_urls?: ReverseLookupLinks;
+  description?: string;
+  google_lens_url?: string;
+  tineye_url?: string;
+  bing_visual_url?: string;
+  yandex_images_url?: string;
+  high_frequency_ratio?: number;
+  reverse_search_ready?: boolean;
+}
+
+export interface BatchItemResult {
+  filename: string;
+  file_size_bytes: number;
+  media_type: string;
+  sha256: string;
+  predicted_label: "AI_GENERATED" | "NOT_AI_GENERATED" | "INCONCLUSIVE";
+  confidence_score: number;
+  model_score: number;
+  phash: string;
+  provenance_signal?: string;
+  rechecked?: boolean;
+  status: string;
+}
+
+export interface BatchAnalysisResponse {
+  batch_id: string;
+  total_files: number;
+  processed_count: number;
+  ai_generated_count: number;
+  genuine_count: number;
+  average_confidence: number;
+  items: BatchItemResult[];
+  timestamp_utc: string;
+}
+
+export interface SealedImageResponse {
+  success?: boolean;
+  status?: string;
+  signed_at_utc?: string;
+  case_id: string;
+  c2pa_manifest_id?: string;
+  original_sha256?: string;
+  sealed_sha256?: string;
+  sha256?: string;
+  watermark_signature?: string;
+  signature_status?: string;
+  sealed_image_data_url: string;
+  c2pa_assertion_manifest?: Record<string, any>;
+  manifest_claim?: Record<string, any>;
+  provenance_badge?: string;
+  message?: string;
+}
+
 export interface Milestone1Response {
   request_id: string;
   timestamp_utc: string;
@@ -310,6 +416,8 @@ export interface Milestone1Response {
   unified_report?: UnifiedForensicReport;
   ai_detection?: AIDetectorResult | null;
   synthid_provenance?: SynthIDProvenanceResult | null;
+  corneal_reflections?: CornealReflectionsResult | null;
+  perceptual_hashes?: PerceptualHashResult | null;
   canonical_verdict?: CanonicalBinaryVerdict;
   component_errors: ComponentError[];
   disclaimer: string;

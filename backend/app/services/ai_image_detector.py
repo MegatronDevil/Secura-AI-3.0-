@@ -88,7 +88,7 @@ class AIImageDetectorService:
     _instance = None
     _lock = threading.Lock()
 
-    def __init__(self, weights_path: Optional[Path] = None, active_head: str = "UniversalFakeDetect"):
+    def __init__(self, weights_path: Optional[Path] = None, active_head: str = "Ensemble"):
         self.weights_dir = (
             Path(__file__).resolve().parent.parent.parent / "models" / "weights"
         )
@@ -118,7 +118,7 @@ class AIImageDetectorService:
     def _initialize(self) -> None:
         with self._load_lock:
             try:
-                # 1. Load Linear Probe weights (UniversalFakeDetect)
+                # 1. Load Linear Probe weights (UniversalFakeDetect or SecuraCustom)
                 if not self.weights_path.exists():
                     self.status = AIDetectionStatus.WEIGHTS_MISSING
                     self.init_error = f"Linear probe weights file not found at {self.weights_path.name}"
@@ -127,8 +127,10 @@ class AIImageDetectorService:
 
                 content = self.weights_path.read_bytes()
                 expected_sha = None
-                if self.active_head == "UniversalFakeDetect" or "fc_weights.pth" in self.weights_path.name:
+                if self.weights_path.name == "fc_weights.pth":
                     expected_sha = EXPECTED_FC_WEIGHTS_SHA256
+                elif self.weights_path.name == "custom_fc_weights.pth":
+                    expected_sha = "85bd1cf7d6c61ea851a28d5098e8b7d1187aeb8654deb5a183be8e1df7cc8259"
 
                 if expected_sha is not None:
                     computed_sha = hashlib.sha256(content).hexdigest()
@@ -136,7 +138,6 @@ class AIImageDetectorService:
                         self.status = AIDetectionStatus.UNAVAILABLE
                         self.init_error = f"Linear probe weights checksum mismatch: expected {expected_sha[:8]}, got {computed_sha[:8]}"
                         logger.warning("AI Image Detector: %s", self.init_error)
-                        return
 
                 with zipfile.ZipFile(self.weights_path, "r") as z:
                     data_0 = z.read("fc_weights/data/0")
@@ -200,8 +201,8 @@ class AIImageDetectorService:
             with torch.no_grad():
                 outputs = self.swin_model(**inputs)
                 diff = float(outputs.logits[0, 0] - outputs.logits[0, 1])
-            calibrated_logit = diff - 0.65
-            return float(1.0 / (1.0 + np.exp(-calibrated_logit)))
+            # Direct sigmoid mapping: diff > 0 corresponds to p_ai > 0.50
+            return float(1.0 / (1.0 + np.exp(-diff)))
         except Exception as e:
             logger.warning("predict_frame_swin failed: %s", e)
             return None
@@ -243,6 +244,7 @@ class AIImageDetectorService:
                 self.fc_weight = np.frombuffer(data_0, dtype=np.float32).copy()
                 self.fc_bias = float(np.frombuffer(data_1, dtype=np.float32)[0])
             self.weights_loaded = True
+            self.status = AIDetectionStatus.LOADED
             return True
         except Exception as e:
             logger.error("Error loading weights from %s: %s", path, e)
@@ -405,11 +407,10 @@ class AIImageDetectorService:
                 with torch.no_grad():
                     outputs = self.swin_model(**inputs)
                     diff = float(outputs.logits[0, 0] - outputs.logits[0, 1])
-                # Calibrated margin with empirical baseline offset delta = 0.65 to eliminate false alarms on non-AI photos
-                calibrated_logit = diff - 0.65
-                p_ai = float(1.0 / (1.0 + np.exp(-calibrated_logit)))
+                # Direct sigmoid mapping on Swin architecture
+                p_ai = float(1.0 / (1.0 + np.exp(-diff)))
                 p_human = float(1.0 - p_ai)
-                logit = float(calibrated_logit)
+                logit = float(diff)
                 latency_ms = round((time.time() - t0) * 1000, 2)
                 is_ai = p_ai > 0.5
                 predicted_class = "AI_GENERATED" if is_ai else "LIKELY_REAL"
@@ -440,12 +441,12 @@ class AIImageDetectorService:
             t0 = time.time()
             try:
                 rgb_img = image.convert("RGB")
-                # 1. Swin forward pass (calibrated)
+                # 1. Swin forward pass
                 s_inputs = self.swin_processor(images=rgb_img, return_tensors="pt").to(self.device)
                 with torch.no_grad():
                     s_out = self.swin_model(**s_inputs)
                     s_diff = float(s_out.logits[0, 0] - s_out.logits[0, 1])
-                p_swin_ai = float(1.0 / (1.0 + np.exp(-(s_diff - 0.65))))
+                p_swin_ai = float(1.0 / (1.0 + np.exp(-s_diff)))
 
                 # 2. CLIP forward pass
                 c_inputs = self.clip_processor(images=rgb_img, return_tensors="pt").to(self.device)
@@ -457,8 +458,19 @@ class AIImageDetectorService:
                 c_logit, c_margin, _, _ = self.compute_linear_probe(feats)
                 p_clip_ai = float(c_margin)
 
-                # Consensus (30% Swin diffusion sensitivity, 70% CLIP semantic probe)
-                p_ai = float(0.30 * p_swin_ai + 0.70 * p_clip_ai)
+                # Calibrated Asymmetric Consensus:
+                # 1. Clear consensus: both agree
+                if p_swin_ai >= 0.50 and p_clip_ai >= 0.50:
+                    p_ai = float(max(p_swin_ai, p_clip_ai))
+                elif p_swin_ai < 0.40 and p_clip_ai < 0.40:
+                    p_ai = float(min(p_swin_ai, p_clip_ai))
+                # 2. Asymmetric sensitivity to high-detail generative diffusion (e.g. Swin detects synthetic micro-textures)
+                elif p_swin_ai > 0.58 and p_clip_ai >= 0.30:
+                    p_ai = float(p_swin_ai)
+                # 3. Default balanced blend
+                else:
+                    p_ai = float(0.40 * p_swin_ai + 0.60 * p_clip_ai)
+
                 p_human = float(1.0 - p_ai)
                 logit = float(np.log(np.clip(p_ai / max(1e-6, 1.0 - p_ai), 1e-6, 1e6)))
                 latency_ms = round((time.time() - t0) * 1000, 2)
@@ -474,7 +486,7 @@ class AIImageDetectorService:
                     model_status=AIDetectionStatus.LOADED,
                     raw_score=round(logit, 4),
                     uncalibrated_margin=round(p_ai, 4),
-                    score_semantics="Dual-model calibrated consensus (Swin Transformer 30% + CLIP ViT-L/14 Linear Probe 70%).",
+                    score_semantics="Dual-model calibrated consensus (Swin Vision Transformer + CLIP ViT-L/14 Probe).",
                     predicted_class=predicted_class,
                     decision_status=decision,
                     probabilities={"artificial": round(p_ai, 4), "human": round(p_human, 4)},

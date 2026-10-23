@@ -30,10 +30,24 @@ from app.services.ai_image_detector import (
 )
 
 
+@pytest.fixture(autouse=True)
+def reset_detector_head():
+    """Ensure active head is reset to UniversalFakeDetect for detector unit tests."""
+    detector = get_ai_image_detector()
+    if detector.active_head != "UniversalFakeDetect":
+        detector.switch_head("UniversalFakeDetect")
+    yield
+    if detector.active_head != "UniversalFakeDetect":
+        detector.switch_head("UniversalFakeDetect")
+
+
 @pytest.fixture
 def detector_service():
     """Return the global detector service."""
-    return get_ai_image_detector()
+    detector = get_ai_image_detector()
+    if detector.active_head != "UniversalFakeDetect":
+        detector.switch_head("UniversalFakeDetect")
+    return detector
 
 
 @pytest.fixture

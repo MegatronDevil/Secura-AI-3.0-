@@ -414,8 +414,10 @@ class SecuraSocialService:
                     canonical_score = max(canonical_score, 0.96)
                     canonical_verdict = "AI GENERATED"
             else:
-                # Image inference
+                # Image inference (strictly using Multi-Architecture Ensemble)
                 detector = get_ai_image_detector()
+                if detector.active_head != "Ensemble":
+                    detector.switch_head("Ensemble")
                 pil_img = Image.open(io.BytesIO(media_bytes)).convert("RGB")
                 img_res = detector.detect(pil_img)
 

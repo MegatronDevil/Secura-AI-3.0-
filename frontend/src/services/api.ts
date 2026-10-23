@@ -4,7 +4,11 @@ import {
   ApiErrorDetail, 
   UserSession, 
   LoginResponse, 
-  ModelRegistryStatusResponse 
+  ModelRegistryStatusResponse,
+  BatchAnalysisResponse,
+  SealedImageResponse,
+  ExplainabilityHeatmapResponse,
+  LiveShieldFrameResponse
 } from "../types/api";
 import { API_BASE_URL } from "./env";
 
@@ -434,7 +438,6 @@ export async function analyzeVideoFile(
   try {
     const decoded = await sampleVideoInBrowser(file, sampleIntervalSec, Math.min(16, maxSamples));
     clientSampledFrames = decoded.sampledFrames;
-    formData.append("file", decoded.keyframe);
 
     // Strip heavy base64 strings so multipart field size stays tiny (<2KB), avoiding 1024KB limit
     const lightweightFrames = decoded.sampledFrames.map((f) => ({
@@ -452,14 +455,10 @@ export async function analyzeVideoFile(
     formData.append("video_height", decoded.height.toString());
   } catch (decodeErr) {
     console.warn("Client video decoding fallback:", decodeErr);
-    if (file.size > 4 * 1024 * 1024) {
-      // Avoid HTTP 413 by slicing first 3.8 MB chunk for header inspection
-      const chunk = file.slice(0, 3.8 * 1024 * 1024, file.type || "video/mp4");
-      formData.append("file", new File([chunk], file.name, { type: file.type || "video/mp4" }));
-    } else {
-      formData.append("file", file);
-    }
   }
+
+  // Always send the full real video file so the backend can execute multi-branch temporal forensics (ReStraV, Farneback, Chromatic)
+  formData.append("file", file, file.name);
 
   const endpoint = `${API_BASE_URL}/api/v1/analyze/video?sample_interval_sec=${sampleIntervalSec}&max_samples=${maxSamples}`;
 
@@ -543,3 +542,209 @@ export async function analyzeVideoFrame(
     throw new ApiServiceError(message, 0, "NETWORK_ERROR");
   }
 }
+
+/**
+ * Seals an asset with a cryptographically verifiable C2PA manifest & forensic custody badge.
+ */
+export async function sealImage(
+  file: File,
+  verdict: string,
+  confidence: number,
+  caseId?: string
+): Promise<SealedImageResponse> {
+  const safeFile = await compressImageIfNeeded(file, 3.5);
+  const formData = new FormData();
+  formData.append("file", safeFile);
+  formData.append("verdict", verdict);
+  formData.append("confidence", confidence.toString());
+  if (caseId) {
+    formData.append("case_id", caseId);
+  }
+
+  const endpoint = `${API_BASE_URL}/api/v1/seal/image`;
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      credentials: "include",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      let errorMsg = `Sealing failed with HTTP ${response.status}`;
+      try {
+        const err = await response.json();
+        if (err.detail) errorMsg = typeof err.detail === "string" ? err.detail : err.detail.message || errorMsg;
+      } catch {}
+      throw new ApiServiceError(errorMsg, response.status, "SEAL_ERROR");
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (error instanceof ApiServiceError) throw error;
+    const message = error instanceof Error ? error.message : "Network error during C2PA sealing";
+    throw new ApiServiceError(message, 0, "NETWORK_ERROR");
+  }
+}
+
+/**
+ * Concurrent batch ingestion for up to 30 forensic assets.
+ */
+export async function batchAnalyzeImages(
+  files: File[],
+  probe: string = "Ensemble"
+): Promise<BatchAnalysisResponse> {
+  const formData = new FormData();
+  for (const f of files) {
+    formData.append("files", f);
+  }
+  formData.append("probe", probe);
+
+  const endpoint = `${API_BASE_URL}/api/v1/batch/analyze`;
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      credentials: "include",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      let errorMsg = `Batch analysis failed with HTTP ${response.status}`;
+      try {
+        const err = await response.json();
+        if (err.detail) errorMsg = typeof err.detail === "string" ? err.detail : err.detail.message || errorMsg;
+      } catch {}
+      throw new ApiServiceError(errorMsg, response.status, "BATCH_ANALYSIS_ERROR");
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (error instanceof ApiServiceError) throw error;
+    const message = error instanceof Error ? error.message : "Network error during batch analysis";
+    throw new ApiServiceError(message, 0, "NETWORK_ERROR");
+  }
+}
+
+/**
+ * Feature 3: Fetch Grad-CAM / Swin Spatial Token Projection Heatmap
+ */
+export async function fetchExplainabilityHeatmap(
+  file: File,
+  alpha: number = 0.55
+): Promise<ExplainabilityHeatmapResponse> {
+  const safeFile = await compressImageIfNeeded(file, 3.5);
+  const formData = new FormData();
+  formData.append("file", safeFile);
+  formData.append("alpha", alpha.toString());
+
+  const endpoint = `${API_BASE_URL}/api/v1/explain/heatmap`;
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      credentials: "include",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      let errorMsg = `Explainability analysis failed with HTTP ${response.status}`;
+      try {
+        const err = await response.json();
+        if (err.detail) errorMsg = typeof err.detail === "string" ? err.detail : err.detail.message || errorMsg;
+      } catch {}
+      throw new ApiServiceError(errorMsg, response.status, "EXPLAINABILITY_ERROR");
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (error instanceof ApiServiceError) throw error;
+    const message = error instanceof Error ? error.message : "Network error generating explainability heatmap";
+    throw new ApiServiceError(message, 0, "NETWORK_ERROR");
+  }
+}
+
+/**
+ * Feature 4: Stream Liveness & Anti-Spoof Frame Evaluation (rPPG + Deepfake Shield)
+ */
+export async function sendStreamLivenessFrame(
+  frameBlob: Blob,
+  timestampMs?: number
+): Promise<LiveShieldFrameResponse> {
+  const formData = new FormData();
+  formData.append("file", frameBlob, "webcam_frame.jpg");
+  formData.append("frame", frameBlob, "webcam_frame.jpg");
+  if (timestampMs !== undefined) {
+    formData.append("timestamp_ms", timestampMs.toString());
+  }
+
+  const endpoint = `${API_BASE_URL}/api/v1/stream/liveness-frame`;
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      credentials: "include",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      let errorMsg = `Liveness analysis failed with HTTP ${response.status}`;
+      try {
+        const err = await response.json();
+        if (err.detail) errorMsg = typeof err.detail === "string" ? err.detail : err.detail.message || errorMsg;
+      } catch {}
+      throw new ApiServiceError(errorMsg, response.status, "LIVENESS_ERROR");
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (error instanceof ApiServiceError) throw error;
+    const message = error instanceof Error ? error.message : "Network error during liveness stream processing";
+    throw new ApiServiceError(message, 0, "NETWORK_ERROR");
+  }
+}
+
+/**
+ * Feature 6: Extract Lossless Forensic Evidence Video Segment
+ */
+export async function downloadVideoClip(
+  file: File,
+  startSec: number,
+  endSec: number
+): Promise<Blob> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("start_sec", startSec.toString());
+  formData.append("end_sec", endSec.toString());
+
+  const endpoint = `${API_BASE_URL}/api/v1/video/extract-clip`;
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      credentials: "include",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      let errorMsg = `Video clip extraction failed with HTTP ${response.status}`;
+      try {
+        const err = await response.json();
+        if (err.detail) errorMsg = typeof err.detail === "string" ? err.detail : err.detail.message || errorMsg;
+      } catch {}
+      throw new ApiServiceError(errorMsg, response.status, "VIDEO_CLIP_ERROR");
+    }
+
+    return await response.blob();
+  } catch (error) {
+    if (error instanceof ApiServiceError) throw error;
+    const message = error instanceof Error ? error.message : "Network error during video clip extraction";
+    throw new ApiServiceError(message, 0, "NETWORK_ERROR");
+  }
+}
+

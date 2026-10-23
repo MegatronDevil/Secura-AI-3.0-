@@ -261,6 +261,30 @@ class VideoFrameSampler:
                             )
                         )
                     cap_c.release()
+
+                    # Fallback retry from frame 0 if initial consecutive extraction yielded < 4 frames
+                    if len(consec_frames) < 4:
+                        consec_frames.clear()
+                        cap_c2 = cv2.VideoCapture(tmp_path)
+                        for c_i in range(consec_len):
+                            ret, bgr_c = cap_c2.read()
+                            if not ret or bgr_c is None:
+                                break
+                            rgb_c = cv2.cvtColor(bgr_c, cv2.COLOR_BGR2RGB)
+                            gray_c = cv2.cvtColor(bgr_c, cv2.COLOR_BGR2GRAY)
+                            consec_frames.append(
+                                DecodedFrame(
+                                    sample_index=c_i,
+                                    frame_index=c_i,
+                                    timestamp_sec=round(float(c_i / fps), 3),
+                                    bgr=bgr_c,
+                                    rgb=rgb_c,
+                                    gray=gray_c,
+                                    thumbnail_data_url=None,
+                                    is_scene_cut=False,
+                                )
+                            )
+                        cap_c2.release()
                 except Exception as exc:
                     logger.warning("Consecutive frame extraction failed: %s", exc)
 

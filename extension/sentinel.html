@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Secura AI — Live Screen Sentinel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background: #0d111a;
+      background-image: 
+        radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+      background-size: 20px 20px;
+      color: #f1f5f9;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Apple-style Frosted Glass Header */
+    header {
+      background: rgba(18, 22, 32, 0.65);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      backdrop-filter: blur(40px) saturate(180%);
+      -webkit-backdrop-filter: blur(40px) saturate(180%);
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 9px;
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.06) 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 15px;
+      color: white;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(255, 255, 255, 0.20);
+    }
+    .brand-title {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: #ffffff;
+    }
+    .brand-badge {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      background: rgba(255, 255, 255, 0.08);
+      color: #cbd5e1;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      margin-left: 8px;
+    }
+    .header-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #94a3b8;
+    }
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #10b981;
+      box-shadow: 0 0 8px rgba(16, 185, 129, 0.8);
+    }
+
+    main {
+      flex: 1;
+      padding: 24px;
+      max-width: 1320px;
+      width: 100%;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: 24px;
+    }
+
+    @media (max-width: 960px) {
+      main {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Apple-Grade Neutral Glass Cards */
+    .viewport-card {
+      background: rgba(22, 26, 38, 0.60);
+      backdrop-filter: blur(40px) saturate(180%);
+      -webkit-backdrop-filter: blur(40px) saturate(180%);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-top: 1px solid rgba(255, 255, 255, 0.24);
+      border-radius: 24px;
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      position: relative;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    }
+
+    .viewport-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .viewport-title {
+      font-size: 12.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #94a3b8;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .video-container {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: rgba(10, 14, 22, 0.85);
+      border-radius: 18px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid rgba(255, 255, 255, 0.08);
+      transition: border-color 0.35s ease, box-shadow 0.35s ease;
+    }
+
+    /* Dynamic Real/Authentic Green Border Glow */
+    .video-container.border-green {
+      border: 3px solid rgba(16, 185, 129, 0.85) !important;
+      box-shadow: 0 0 30px rgba(16, 185, 129, 0.35), inset 0 0 20px rgba(16, 185, 129, 0.15) !important;
+    }
+
+    /* Dynamic AI Generated Threat Red Border Glow */
+    .video-container.border-red {
+      border: 3px solid rgba(239, 68, 68, 0.9) !important;
+      box-shadow: 0 0 40px rgba(239, 68, 68, 0.5), inset 0 0 25px rgba(239, 68, 68, 0.2) !important;
+      animation: redThreatPulse 0.9s infinite alternate ease-in-out;
+    }
+
+    @keyframes redThreatPulse {
+      0% { box-shadow: 0 0 25px rgba(239, 68, 68, 0.35), inset 0 0 15px rgba(239, 68, 68, 0.15); }
+      100% { box-shadow: 0 0 50px rgba(239, 68, 68, 0.7), inset 0 0 30px rgba(239, 68, 68, 0.3); }
+    }
+
+    /* Warning Pop-up Modal with OK button & Countdown */
+    #warningModal {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(10, 14, 22, 0.80);
+      backdrop-filter: blur(24px) saturate(180%);
+      -webkit-backdrop-filter: blur(24px) saturate(180%);
+      z-index: 60;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .warning-modal-box {
+      background: rgba(22, 26, 38, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-top: 1px solid rgba(255, 255, 255, 0.35);
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65), 0 0 40px rgba(239, 68, 68, 0.3);
+      border-radius: 22px;
+      max-width: 460px;
+      width: 100%;
+      padding: 26px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      animation: securaPopIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes securaPopIn {
+      from { transform: scale(0.94); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+
+    .warning-badge-pill {
+      font-size: 10.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 3px 12px;
+      border-radius: 9999px;
+      background: rgba(239, 68, 68, 0.18);
+      color: #fca5a5;
+      border: 1px solid rgba(239, 68, 68, 0.35);
+    }
+
+    .warning-timer-text {
+      font-size: 32px;
+      font-weight: 800;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: #ef4444;
+    }
+
+    .grace-track {
+      width: 100%;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 9999px;
+      overflow: hidden;
+      margin: 4px 0;
+    }
+    .grace-fill {
+      width: 100%;
+      height: 100%;
+      background: rgba(255, 255, 255, 0.6);
+      border-radius: 9999px;
+      transition: width 0.1s linear;
+    }
+
+    .warning-ack-btn {
+      background: rgba(255, 255, 255, 0.16);
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 11px 24px;
+      border-radius: 12px;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      border-top: 1px solid rgba(255, 255, 255, 0.45);
+      cursor: pointer;
+      width: 100%;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .warning-ack-btn:hover {
+      background: rgba(255, 255, 255, 0.24);
+      border-top-color: rgba(255, 255, 255, 0.6);
+      transform: translateY(-1px);
+    }
+
+    /* Floating Apple HUD Banner (Active after clicking OK) */
+    .viewport-warning-banner {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      right: 16px;
+      background: rgba(18, 20, 28, 0.75);
+      backdrop-filter: blur(36px) saturate(180%);
+      -webkit-backdrop-filter: blur(36px) saturate(180%);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-top: 1px solid rgba(255, 255, 255, 0.32);
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+      border-radius: 14px;
+      padding: 12px 18px;
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      z-index: 50;
+      color: #ffffff;
+      animation: securaSlideDown 0.25s ease-out;
+    }
+    @keyframes securaSlideDown {
+      from { opacity: 0; transform: translateY(-12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .viewport-grace-badge {
+      font-size: 12px;
+      font-weight: 700;
+      font-family: monospace;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      background: rgba(56, 189, 248, 0.15);
+      color: #38bdf8;
+      border: 1px solid rgba(56, 189, 248, 0.3);
+    }
+
+    /* Video element */
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+
+    .placeholder-view {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      text-align: center;
+      padding: 36px;
+    }
+    .placeholder-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.06);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      color: #cbd5e1;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+    .placeholder-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #ffffff;
+    }
+    .placeholder-desc {
+      font-size: 12.5px;
+      color: #94a3b8;
+      max-width: 440px;
+      line-height: 1.5;
+    }
+
+    /* Bounding Box on Video */
+    .face-overlay-box {
+      position: absolute;
+      border: 2px solid rgba(239, 68, 68, 0.85);
+      background: rgba(239, 68, 68, 0.12);
+      border-radius: 8px;
+      box-shadow: 0 0 15px rgba(239, 68, 68, 0.4);
+      pointer-events: none;
+      transition: all 0.15s ease-out;
+    }
+    .face-overlay-box.safe {
+      border-color: rgba(16, 185, 129, 0.85);
+      background: rgba(16, 185, 129, 0.10);
+      box-shadow: 0 0 15px rgba(16, 185, 129, 0.3);
+    }
+
+    /* Controls bar */
+    .controls-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .btn-primary {
+      background: rgba(255, 255, 255, 0.14);
+      color: white;
+      border: 1px solid rgba(255, 255, 255, 0.20);
+      border-top: 1px solid rgba(255, 255, 255, 0.40);
+      padding: 10px 20px;
+      font-size: 12.5px;
+      font-weight: 600;
+      border-radius: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.20), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    }
+    .btn-primary:hover {
+      background: rgba(255, 255, 255, 0.22);
+      border-top-color: rgba(255, 255, 255, 0.6);
+      transform: translateY(-1px);
+    }
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.25);
+      border: 1px solid rgba(239, 68, 68, 0.45);
+      color: #fca5a5;
+      padding: 10px 18px;
+      font-size: 12.5px;
+      font-weight: 600;
+      border-radius: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+    }
+    .btn-danger:hover {
+      background: rgba(239, 68, 68, 0.45);
+      color: #ffffff;
+    }
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-top: 1px solid rgba(255, 255, 255, 0.22);
+      color: #e2e8f0;
+      padding: 10px 16px;
+      font-size: 12.5px;
+      font-weight: 600;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.12);
+      color: #ffffff;
+    }
+
+    /* Telemetry Sidebar */
+    .telemetry-col {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .telemetry-card {
+      background: rgba(22, 26, 38, 0.60);
+      backdrop-filter: blur(40px) saturate(180%);
+      -webkit-backdrop-filter: blur(40px) saturate(180%);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-top: 1px solid rgba(255, 255, 255, 0.22);
+      border-radius: 24px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    }
+
+    /* Strikes Enforcement Banner */
+    .strikes-card {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-top: 1px solid rgba(255, 255, 255, 0.20);
+      border-radius: 20px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .strikes-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .strikes-title {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: #e2e8f0;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .strikes-indicators {
+      display: flex;
+      gap: 8px;
+    }
+    .strike-node {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1.5px solid rgba(255, 255, 255, 0.22);
+      transition: all 0.3s;
+    }
+    .strike-node.active {
+      background: #ef4444;
+      border-color: #fca5a5;
+      box-shadow: 0 0 10px rgba(239, 68, 68, 0.8);
+    }
+    .strikes-policy {
+      font-size: 11px;
+      color: #94a3b8;
+      line-height: 1.4;
+    }
+
+    /* Risk Score Gauge */
+    .gauge-block {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 14px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 16px;
+    }
+    .gauge-circle {
+      width: 64px;
+      height: 64px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .gauge-val {
+      font-size: 16px;
+      font-weight: 800;
+      font-family: monospace;
+      color: #ffffff;
+    }
+    .gauge-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .gauge-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #94a3b8;
+    }
+    .gauge-status {
+      font-size: 13px;
+      font-weight: 700;
+      color: #ffffff;
+    }
+
+    /* rPPG Waveform Box */
+    .rppg-card {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 16px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .rppg-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: #94a3b8;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .rppg-bpm {
+      font-family: monospace;
+      color: #f43f5e;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    canvas#waveformCanvas {
+      width: 100%;
+      height: 48px;
+      background: rgba(0, 0, 0, 0.4);
+      border-radius: 10px;
+    }
+
+    /* Fullscreen Lockdown Shield Modal */
+    #lockdownModal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.88);
+      backdrop-filter: blur(30px);
+      z-index: 99999;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .lockdown-content {
+      max-width: 500px;
+      width: 100%;
+      background: rgba(24, 28, 40, 0.90);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      border-top: 1px solid rgba(254, 202, 202, 0.6);
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.8), 0 0 50px rgba(239, 68, 68, 0.35);
+      border-radius: 24px;
+      padding: 30px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+    .lockdown-icon {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: rgba(239, 68, 68, 0.18);
+      border: 1px solid rgba(239, 68, 68, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+      color: #ef4444;
+    }
+    .lockdown-title {
+      font-size: 20px;
+      font-weight: 800;
+      color: #ef4444;
+      letter-spacing: -0.01em;
+    }
+    .lockdown-desc {
+      font-size: 13px;
+      color: #e2e8f0;
+      line-height: 1.5;
+    }
+
+    canvas.hidden-canvas {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-icon">S</div>
+      <div>
+        <span class="brand-title">Secura AI — Live Screen Sentinel</span>
+        <span class="brand-badge">Apple Glass HUD</span>
+      </div>
+    </div>
+    <div class="header-status">
+      <span class="status-dot"></span>
+      <span id="engineStatusText">Backend Engine Connected (127.0.0.1:8000)</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- Left Column: Video Viewport -->
+    <div class="viewport-card">
+      <div id="offlineFallbackBanner" style="display: none;">
+        <span>⚠️</span>
+        <span>Secura Backend Offline (127.0.0.1:8000). Active in Local Offline Heuristic Mode.</span>
+      </div>
+
+      <div class="viewport-header">
+        <span class="viewport-title">
+          <span>Target Live Feed</span>
+          <span id="fpsBadge" style="display: none; font-size: 10px; background: rgba(255,255,255,0.08); color: #34d399; padding: 2px 7px; border-radius: 9999px; font-weight: 600;">0 FPS</span>
+        </span>
+        <span id="streamStateText" style="font-size: 11px; color: #94a3b8;">Stream Inactive</span>
+      </div>
+
+      <div class="video-container" id="videoContainer">
+        <!-- Live Shared Screen Video Element -->
+        <video id="screenVideo" autoplay playsinline muted style="display: none;"></video>
+        
+        <!-- Bounding Box Overlay -->
+        <div id="faceBox" class="face-overlay-box" style="display: none;"></div>
+
+        <!-- Floating In-Viewport Top Warning Banner -->
+        <div id="viewportWarningBanner" class="viewport-warning-banner">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 18px;">⚠️</span>
+            <div>
+              <div id="bannerWarningTitle" style="font-size: 13px; font-weight: 700; color: #ffffff;">AI Content Detected (Strike 1/3)</div>
+              <div style="font-size: 11px; color: #cbd5e1;">Grace Window Active: Close AI window before scan resumes</div>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span id="bannerCountdownBadge" class="viewport-grace-badge">10s</span>
+            <button id="btnBannerOk" class="warning-ack-btn" style="width: auto; padding: 6px 14px; font-size: 11.5px;">OK — Close AI Window</button>
+          </div>
+        </div>
+
+        <!-- Interactive Warning Dialog Modal with Countdown -->
+        <div id="warningModal">
+          <div class="warning-modal-box">
+            <span class="warning-badge-pill" id="warningModalStrikePill">SECURITY WARNING 1 OF 3</span>
+            <div style="font-size: 34px;">⚠️</div>
+            <div style="font-size: 17px; font-weight: 700; color: #ffffff;">AI-Generated Media Detected</div>
+            <div style="font-size: 12.5px; color: #cbd5e1; line-height: 1.5; max-width: 380px;">
+              Synthetic video or generative texture was detected on your shared screen. You have a grace window to close the offending window.
+            </div>
+            
+            <div class="warning-timer-text" id="warningCountdownTimer">10s</div>
+            
+            <div class="grace-track">
+              <div id="graceProgressFill" class="grace-fill" style="width: 100%;"></div>
+            </div>
+            
+            <div style="display: flex; gap: 10px; width: 100%; margin-top: 6px;">
+              <button id="btnWarningModalOk" class="warning-ack-btn">
+                ✓ OK — I'm Closing It
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Placeholder when inactive -->
+        <div class="placeholder-view" id="placeholderView">
+          <div class="placeholder-icon">⛶</div>
+          <div class="placeholder-title">Live Screen Sharing Sentinel</div>
+          <div class="placeholder-desc">
+            Share any screen, application window, or browser tab. Secura AI continuously evaluates facial regions in real time using the Swin Transformer model &amp; rPPG vascular green-channel pulse algorithms.
+          </div>
+          <button id="startShareBtn" class="btn-primary" style="margin-top: 8px;">
+            <span>Start Live Screen Sentinel</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Controls -->
+      <div class="controls-bar">
+        <button id="btnStart" class="btn-primary">
+          <span>Start Screen Share</span>
+        </button>
+        <button id="btnStop" class="btn-danger" style="display: none;">
+          <span>Terminate Stream</span>
+        </button>
+        <button id="btnSimulate" class="btn-secondary">
+          <span>Simulate Attack Feed</span>
+        </button>
+        <button id="btnSyncCookies" class="btn-secondary" title="Sync session tokens &amp; policy with browser cookies">
+          <span>Sync Cookies</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Right Column: Forensic Telemetry & Strikes Enforcement -->
+    <div class="telemetry-col">
+      <!-- 3-Strikes Auto-Close Policy Card -->
+      <div class="strikes-card">
+        <div class="strikes-top">
+          <span class="strikes-title">Enforcement Policy (3 Strikes)</span>
+          <div class="strikes-indicators">
+            <div id="strikeNode1" class="strike-node"></div>
+            <div id="strikeNode2" class="strike-node"></div>
+            <div id="strikeNode3" class="strike-node"></div>
+          </div>
+        </div>
+        <div class="strikes-policy">
+          If synthetic face injection or deepfake manipulation is detected <strong>3 consecutive times</strong>, the live screen share will be <strong>automatically terminated immediately</strong> to mitigate fraud.
+        </div>
+      </div>
+
+      <!-- Live Verdict & Risk Meter -->
+      <div class="telemetry-card">
+        <div class="gauge-block">
+          <div class="gauge-circle">
+            <span id="riskScoreNum" class="gauge-val">0%</span>
+          </div>
+          <div class="gauge-info">
+            <span class="gauge-label">Synthetic Risk Probability</span>
+            <span id="verdictLabel" class="gauge-status" style="color: #10b981;">STANDBY</span>
+          </div>
+        </div>
+
+        <!-- rPPG Hemoglobin Pulse Waveform -->
+        <div class="rppg-card">
+          <div class="rppg-head">
+            <span>Sub-Dermal Pulse Wave (rPPG)</span>
+            <span id="bpmReading" class="rppg-bpm">-- BPM</span>
+          </div>
+          <canvas id="waveformCanvas" width="340" height="48"></canvas>
+        </div>
+
+        <!-- Forensic Signal Breakdown -->
+        <div style="display: flex; flex-direction: column; gap: 8px; font-size: 11.5px;">
+          <div style="display: flex; justify-content: space-between; color: #94a3b8;">
+            <span>Swin Neural Artifacts:</span>
+            <strong id="swinScoreText" style="color: #ffffff;">--</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; color: #94a3b8;">
+            <span>Vascular Variance:</span>
+            <strong id="varScoreText" style="color: #ffffff;">--</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; color: #94a3b8;">
+            <span>Temporal Continuity:</span>
+            <strong id="temporalScoreText" style="color: #ffffff;">--</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Fullscreen Security Lockdown Modal (Triggered on 3rd Strike) -->
+  <div id="lockdownModal">
+    <div class="lockdown-content">
+      <div class="lockdown-icon">🛡</div>
+      <div class="lockdown-title">SECURITY INTERVENTION TRIGGERED</div>
+      <div class="lockdown-desc">
+        <strong>3 consecutive synthetic AI deepfake injection attempts were detected in the active stream.</strong>
+        <br><br>
+        In accordance with Secura AI automated defense policy, your screen share session has been <strong>terminated immediately</strong> to prevent credential compromise and synthetic impersonation.
+      </div>
+      <div style="display: flex; gap: 12px; width: 100%; margin-top: 8px;">
+        <button id="btnAcknowledgeLockdown" class="btn-primary" style="flex: 1; justify-content: center;">
+          Acknowledge &amp; Reset Sentinel
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Offscreen analysis canvas -->
+  <canvas id="analysisCanvas" class="hidden-canvas"></canvas>
+
+  <script src="sentinel.js"></script>
+</body>
+</html>

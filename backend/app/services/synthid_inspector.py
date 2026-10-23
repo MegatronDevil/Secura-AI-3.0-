@@ -112,11 +112,6 @@ def inspect_synthid_provenance(
             watermark_confidence = 0.95
             state = SynthIDStateEnum.WATERMARK_DETECTED
             audit_notes.append("Google Gemini generative asset identified with intrinsic SynthID watermark frequency modulation.")
-        elif spectral_mean > 2.0 and spectral_var < 0.38 and w >= 256 and h >= 256:
-            has_watermark_signal = True
-            watermark_confidence = min(0.98, float(0.85 + (0.38 - spectral_var)))
-            state = SynthIDStateEnum.WATERMARK_DETECTED
-            audit_notes.append("SynthID spatial-frequency watermark signature verified in high-frequency spectral band.")
         elif is_probable_screenshot:
             state = SynthIDStateEnum.SCREENSHOT_FALLBACK_ACTIVE
             watermark_confidence = 0.0

@@ -1,0 +1,1082 @@
+/* Secura AI 2.0 - Enterprise Forensic HUD & Screen Sentinel Stylesheet */
+
+@keyframes securaFadeInSlide {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes securaPulseGlowRed {
+  0%, 100% {
+    box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.8), 0 0 25px rgba(239, 68, 68, 0.35);
+  }
+  50% {
+    box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.8), 0 0 45px rgba(239, 68, 68, 0.65);
+  }
+}
+
+@keyframes securaPulseGlowGreen {
+  0%, 100% {
+    box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.8), 0 0 20px rgba(16, 185, 129, 0.25);
+  }
+  50% {
+    box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.8), 0 0 35px rgba(16, 185, 129, 0.45);
+  }
+}
+
+@keyframes securaRadarScan {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes securaHeartbeat {
+  0%, 100% { transform: scale(1); }
+  14% { transform: scale(1.18); }
+  28% { transform: scale(1); }
+  42% { transform: scale(1.12); }
+  70% { transform: scale(1); }
+}
+
+#secura-floating-modal {
+  position: fixed !important;
+  bottom: 24px !important;
+  right: 24px !important;
+  width: 410px !important;
+  max-width: 94vw !important;
+  max-height: 90vh !important;
+  background: rgba(18, 20, 26, 0.65) !important;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px) !important;
+  background-size: 16px 16px !important;
+  backdrop-filter: blur(40px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(40px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.30) !important;
+  border-radius: 20px !important;
+  color: #f1f5f9 !important;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif !important;
+  font-size: 13px !important;
+  line-height: 1.45 !important;
+  z-index: 2147483647 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  box-sizing: border-box !important;
+  box-shadow: 
+    0 24px 60px rgba(0, 0, 0, 0.50), 
+    inset 0 1px 0 rgba(255, 255, 255, 0.20) !important;
+  animation: securaFadeInSlide 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+  transition: border-color 0.3s, box-shadow 0.3s, transform 0.2s !important;
+}
+
+#secura-floating-modal::-webkit-scrollbar {
+  width: 4px !important;
+}
+#secura-floating-modal::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2) !important;
+}
+#secura-floating-modal::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2) !important;
+  border-radius: 4px !important;
+}
+
+#secura-floating-modal.secura-theme-threat {
+  border-color: rgba(239, 68, 68, 0.5) !important;
+  border-top-color: rgba(254, 202, 202, 0.7) !important;
+  box-shadow: 
+    0 24px 60px rgba(0, 0, 0, 0.6), 
+    0 0 30px rgba(239, 68, 68, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25) !important;
+}
+
+#secura-floating-modal.secura-theme-authentic {
+  border-color: rgba(16, 185, 129, 0.4) !important;
+  border-top-color: rgba(167, 243, 208, 0.7) !important;
+  box-shadow: 
+    0 24px 60px rgba(0, 0, 0, 0.6), 
+    0 0 25px rgba(16, 185, 129, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25) !important;
+}
+
+#secura-floating-modal * {
+  box-sizing: border-box !important;
+  margin: 0;
+  padding: 0;
+}
+
+/* Header */
+.secura-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 13px 18px !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  cursor: grab !important;
+  user-select: none !important;
+}
+.secura-header:active {
+  cursor: grabbing !important;
+}
+
+.secura-brand {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+}
+
+.secura-shield-icon {
+  width: 26px !important;
+  height: 26px !important;
+  border-radius: 8px !important;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.20) 0%, rgba(255, 255, 255, 0.05) 100%) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-weight: 800 !important;
+  font-size: 13px !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+}
+
+.secura-title-block {
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.secura-title {
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  color: #ffffff !important;
+  letter-spacing: -0.01em !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+
+.secura-badge-v2 {
+  font-size: 9px !important;
+  font-weight: 700 !important;
+  padding: 1px 5px !important;
+  border-radius: 4px !important;
+  background: rgba(59, 130, 246, 0.25) !important;
+  color: #60a5fa !important;
+  letter-spacing: 0.05em !important;
+  border: 1px solid rgba(59, 130, 246, 0.4) !important;
+}
+
+.secura-subtitle {
+  font-size: 10.5px !important;
+  color: #94a3b8 !important;
+  font-weight: 500 !important;
+}
+
+.secura-controls {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+
+.secura-btn-icon {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: #94a3b8 !important;
+  width: 24px !important;
+  height: 24px !important;
+  border-radius: 6px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  font-size: 14px !important;
+  transition: all 0.15s !important;
+}
+.secura-btn-icon:hover {
+  background: rgba(255, 255, 255, 0.15) !important;
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.25) !important;
+}
+
+/* Hero Verdict Section */
+.secura-hero-container {
+  padding: 18px !important;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 14px !important;
+}
+
+.secura-hero-info {
+  flex: 1 !important;
+}
+
+.secura-threat-pill {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  padding: 3px 8px !important;
+  border-radius: 20px !important;
+  font-size: 10px !important;
+  font-weight: 800 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  margin-bottom: 6px !important;
+}
+
+.secura-pill-threat {
+  background: rgba(239, 68, 68, 0.2) !important;
+  color: #f87171 !important;
+  border: 1px solid rgba(239, 68, 68, 0.4) !important;
+}
+
+.secura-pill-safe {
+  background: rgba(16, 185, 129, 0.2) !important;
+  color: #34d399 !important;
+  border: 1px solid rgba(16, 185, 129, 0.4) !important;
+}
+
+.secura-verdict-heading {
+  font-size: 16px !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.01em !important;
+  color: #ffffff !important;
+  line-height: 1.25 !important;
+  margin-bottom: 4px !important;
+}
+
+.secura-verdict-summary {
+  font-size: 11.5px !important;
+  color: #cbd5e1 !important;
+  line-height: 1.4 !important;
+}
+
+/* Circular Gauge */
+.secura-gauge-box {
+  width: 72px !important;
+  height: 72px !important;
+  position: relative !important;
+  flex-shrink: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.secura-gauge-svg {
+  width: 100% !important;
+  height: 100% !important;
+  transform: rotate(-90deg) !important;
+}
+
+.secura-gauge-bg {
+  fill: none !important;
+  stroke: rgba(255, 255, 255, 0.08) !important;
+  stroke-width: 6 !important;
+}
+
+.secura-gauge-fill {
+  fill: none !important;
+  stroke-width: 6 !important;
+  stroke-linecap: round !important;
+  transition: stroke-dashoffset 0.8s ease-out !important;
+}
+
+.secura-gauge-text {
+  position: absolute !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.secura-gauge-num {
+  font-size: 14px !important;
+  font-weight: 800 !important;
+  font-family: monospace !important;
+  color: #ffffff !important;
+  line-height: 1 !important;
+}
+
+.secura-gauge-lbl {
+  font-size: 8px !important;
+  color: #94a3b8 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+  margin-top: 2px !important;
+}
+
+/* 3-Strike Warning Counter Banner */
+.secura-strikes-container {
+  padding: 10px 16px !important;
+  background: rgba(239, 68, 68, 0.08) !important;
+  border-bottom: 1px solid rgba(239, 68, 68, 0.18) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+}
+
+.secura-strikes-label {
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  color: #fca5a5 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+
+.secura-strikes-dots {
+  display: flex !important;
+  gap: 6px !important;
+}
+
+.secura-strike-pill {
+  width: 10px !important;
+  height: 10px !important;
+  border-radius: 50% !important;
+  background: rgba(255, 255, 255, 0.15) !important;
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  transition: all 0.2s !important;
+}
+
+.secura-strike-pill.active {
+  background: #ef4444 !important;
+  box-shadow: 0 0 10px #ef4444 !important;
+  border-color: #f87171 !important;
+}
+
+/* Forensic Diagnostic Breakdown */
+.secura-body-content {
+  padding: 14px 16px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px !important;
+}
+
+.secura-section-title {
+  font-size: 10.5px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.06em !important;
+  color: #64748b !important;
+  margin-bottom: 6px !important;
+}
+
+/* Progress bar signal rows */
+.secura-signal-row {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 4px !important;
+  margin-bottom: 8px !important;
+}
+
+.secura-signal-meta {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  font-size: 11.5px !important;
+}
+
+.secura-signal-name {
+  color: #cbd5e1 !important;
+  font-weight: 500 !important;
+}
+
+.secura-signal-score {
+  font-family: monospace !important;
+  font-weight: 700 !important;
+  color: #ffffff !important;
+}
+
+.secura-bar-track {
+  width: 100% !important;
+  height: 5px !important;
+  border-radius: 4px !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  overflow: hidden !important;
+}
+
+.secura-bar-fill {
+  height: 100% !important;
+  border-radius: 4px !important;
+  transition: width 0.6s ease-out !important;
+}
+
+/* Provenance & Watermark Pills Grid */
+.secura-tags-grid {
+  display: grid !important;
+  grid-template-columns: 1fr 1fr !important;
+  gap: 8px !important;
+}
+
+.secura-tag-item {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 8px !important;
+  padding: 8px 10px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+}
+
+.secura-tag-key {
+  font-size: 9.5px !important;
+  color: #94a3b8 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.04em !important;
+}
+
+.secura-tag-val {
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  color: #e2e8f0 !important;
+}
+
+/* rPPG Pulse Waveform Visualizer */
+.secura-wave-box {
+  background: rgba(15, 23, 42, 0.6) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 10px !important;
+  padding: 10px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+}
+
+.secura-wave-left {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+.secura-pulse-icon {
+  color: #f43f5e !important;
+  animation: securaHeartbeat 1.2s infinite ease-in-out !important;
+  font-size: 20px !important;
+}
+
+.secura-pulse-reading {
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.secura-pulse-bpm {
+  font-size: 14px !important;
+  font-weight: 800 !important;
+  font-family: monospace !important;
+  color: #ffffff !important;
+}
+
+.secura-pulse-desc {
+  font-size: 9.5px !important;
+  color: #94a3b8 !important;
+  text-transform: uppercase !important;
+}
+
+.secura-wave-canvas {
+  width: 140px !important;
+  height: 32px !important;
+  border-radius: 4px !important;
+  background: rgba(0, 0, 0, 0.4) !important;
+}
+
+/* Action Buttons Bar */
+.secura-actions-box {
+  padding: 12px 16px !important;
+  background: rgba(15, 23, 42, 0.6) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+  display: flex !important;
+  gap: 8px !important;
+}
+
+.secura-btn-screen-share {
+  flex: 1 !important;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+  color: #ffffff !important;
+  padding: 9px 12px !important;
+  border-radius: 8px !important;
+  font-size: 11.5px !important;
+  font-weight: 700 !important;
+  border: none !important;
+  cursor: pointer !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35) !important;
+  transition: all 0.15s !important;
+  text-decoration: none !important;
+}
+.secura-btn-screen-share:hover {
+  background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
+  transform: translateY(-1px) !important;
+}
+
+.secura-btn-copy {
+  background: rgba(255, 255, 255, 0.07) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  color: #e2e8f0 !important;
+  padding: 9px 12px !important;
+  border-radius: 8px !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 5px !important;
+  transition: all 0.15s !important;
+}
+.secura-btn-copy:hover {
+  background: rgba(255, 255, 255, 0.14) !important;
+  color: #ffffff !important;
+}
+
+/* Loading Toast */
+.secura-loading-toast {
+  padding: 24px 20px !important;
+  text-align: center !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 14px !important;
+}
+
+.secura-spinner-ring {
+  width: 44px !important;
+  height: 44px !important;
+  border-radius: 50% !important;
+  border: 3px solid rgba(59, 130, 246, 0.2) !important;
+  border-top-color: #38bdf8 !important;
+  border-right-color: #3b82f6 !important;
+  animation: securaRadarScan 0.9s linear infinite !important;
+}
+
+.secura-loading-title {
+  font-size: 13.5px !important;
+  font-weight: 700 !important;
+  color: #ffffff !important;
+}
+
+.secura-loading-detail {
+  font-size: 11.5px !important;
+  color: #94a3b8 !important;
+  max-width: 320px !important;
+}
+
+/* Error Toast */
+.secura-error-box {
+  padding: 16px !important;
+}
+.secura-err-title {
+  color: #f87171 !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  margin-bottom: 6px !important;
+}
+.secura-err-detail {
+  font-size: 11.5px !important;
+  color: #cbd5e1 !important;
+  line-height: 1.4 !important;
+}
+
+/* Fullscreen Security Lockdown Intervention Modal (Auto-Close 3rd strike) */
+#secura-security-lockdown-overlay {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2147483647 !important;
+  background: rgba(0, 0, 0, 0.92) !important;
+  backdrop-filter: blur(25px) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 24px !important;
+  animation: securaFadeInSlide 0.3s forwards !important;
+  color: #ffffff !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+}
+
+.secura-lockdown-card {
+  max-width: 500px !important;
+  width: 100% !important;
+  background: linear-gradient(135deg, rgba(26, 11, 22, 0.82) 0%, rgba(13, 6, 14, 0.92) 100%) !important;
+  backdrop-filter: blur(32px) saturate(200%) !important;
+  -webkit-backdrop-filter: blur(32px) saturate(200%) !important;
+  border: 1.5px solid rgba(239, 68, 68, 0.6) !important;
+  border-top: 1.5px solid rgba(254, 202, 202, 0.7) !important;
+  box-shadow: 
+    0 24px 70px rgba(0, 0, 0, 0.8), 
+    0 0 50px rgba(239, 68, 68, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3) !important;
+  border-radius: 22px !important;
+  padding: 28px !important;
+  text-align: center !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 16px !important;
+}
+
+.secura-lock-icon {
+  width: 64px !important;
+  height: 64px !important;
+  border-radius: 50% !important;
+  background: rgba(239, 68, 68, 0.2) !important;
+  border: 2px solid #ef4444 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 32px !important;
+  color: #f87171 !important;
+}
+
+.secura-lock-title {
+  font-size: 20px !important;
+  font-weight: 800 !important;
+  color: #ef4444 !important;
+  letter-spacing: -0.02em !important;
+}
+
+.secura-lock-msg {
+  font-size: 13px !important;
+  color: #cbd5e1 !important;
+  line-height: 1.5 !important;
+}
+
+.secura-lock-actions {
+  display: flex !important;
+  gap: 12px !important;
+  width: 100% !important;
+  margin-top: 8px !important;
+}
+
+.secura-lock-btn-danger {
+  flex: 1 !important;
+  background: #dc2626 !important;
+  color: white !important;
+  border: none !important;
+  padding: 10px 14px !important;
+  border-radius: 10px !important;
+  font-weight: 700 !important;
+  font-size: 12px !important;
+  cursor: pointer !important;
+}
+
+.secura-lock-btn-outline {
+  flex: 1 !important;
+  background: transparent !important;
+  color: #94a3b8 !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  padding: 10px 14px !important;
+  border-radius: 10px !important;
+  font-weight: 600 !important;
+  font-size: 12px !important;
+  cursor: pointer !important;
+}
+
+/* Floating Minimized Badge */
+#secura-minimized-badge {
+  position: fixed !important;
+  bottom: 24px !important;
+  right: 24px !important;
+  width: 46px !important;
+  height: 46px !important;
+  border-radius: 50% !important;
+  background: #0f172a !important;
+  border: 2px solid #3b82f6 !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 15px rgba(59, 130, 246, 0.4) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  z-index: 2147483647 !important;
+  color: #ffffff !important;
+  font-weight: bold !important;
+  font-size: 18px !important;
+  transition: transform 0.2s !important;
+}
+#secura-minimized-badge:hover {
+  transform: scale(1.1) !important;
+}
+
+/* ==========================================================================
+   IN-PAGE LIVE SCREEN SENTINEL (Direct In-Chrome Active Tab Protection)
+   ========================================================================== */
+
+@keyframes securaThreatBorderPulse {
+  0% {
+    box-shadow: inset 0 0 25px rgba(239, 68, 68, 0.5), 0 0 20px rgba(239, 68, 68, 0.4);
+    border-color: rgba(239, 68, 68, 0.85);
+  }
+  100% {
+    box-shadow: inset 0 0 55px rgba(239, 68, 68, 0.85), 0 0 35px rgba(239, 68, 68, 0.7);
+    border-color: #ef4444;
+  }
+}
+
+@keyframes securaGraceCountdown {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+
+/* 1. Fullscreen Ambient Viewport Border */
+#secura-screen-ambient-border {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  pointer-events: none !important;
+  z-index: 2147483640 !important;
+  box-sizing: border-box !important;
+  transition: border-color 0.4s ease, box-shadow 0.4s ease !important;
+}
+
+#secura-screen-ambient-border.secura-border-green {
+  border: 4px solid rgba(16, 185, 129, 0.8) !important;
+  box-shadow: inset 0 0 30px rgba(16, 185, 129, 0.35) !important;
+}
+
+#secura-screen-ambient-border.secura-border-red {
+  border: 5px solid #ef4444 !important;
+  animation: securaThreatBorderPulse 0.9s infinite alternate ease-in-out !important;
+}
+
+/* 2. Top-Center Docked Sentinel Pill Bar - Apple VisionOS Translucent */
+#secura-inpage-sentinel-bar {
+  position: fixed !important;
+  top: 14px !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  z-index: 2147483646 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  padding: 8px 18px !important;
+  background: rgba(18, 20, 26, 0.70) !important;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px) !important;
+  background-size: 16px 16px !important;
+  backdrop-filter: blur(36px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(36px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.30) !important;
+  border-radius: 9999px !important;
+  box-shadow: 
+    0 16px 40px rgba(0, 0, 0, 0.45), 
+    inset 0 1px 0 rgba(255, 255, 255, 0.20) !important;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif !important;
+  color: #f8fafc !important;
+  font-size: 12px !important;
+  white-space: nowrap !important;
+  user-select: none !important;
+  animation: securaFadeInSlide 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+#secura-inpage-sentinel-bar.bar-threat {
+  border-color: rgba(239, 68, 68, 0.5) !important;
+  border-top-color: rgba(254, 202, 202, 0.7) !important;
+  box-shadow: 0 12px 35px rgba(0, 0, 0, 0.55), 0 0 25px rgba(239, 68, 68, 0.3) !important;
+}
+
+.secura-bar-badge {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.02em !important;
+  padding: 4px 10px !important;
+  border-radius: 9999px !important;
+  font-size: 11px !important;
+}
+
+.secura-bar-badge.badge-green {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #34d399 !important;
+  border: 1px solid rgba(16, 185, 129, 0.3) !important;
+}
+
+.secura-bar-badge.badge-red {
+  background: rgba(239, 68, 68, 0.18) !important;
+  color: #f87171 !important;
+  border: 1px solid rgba(239, 68, 68, 0.45) !important;
+  animation: securaThreatBorderPulse 1s infinite alternate !important;
+}
+
+.secura-bar-metrics {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  color: #cbd5e1 !important;
+  font-size: 11.5px !important;
+  border-left: 1px solid rgba(255, 255, 255, 0.10) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.10) !important;
+  padding: 0 10px !important;
+}
+
+.secura-bar-btn {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.28) !important;
+  color: #e2e8f0 !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  padding: 5px 12px !important;
+  border-radius: 9999px !important;
+  cursor: pointer !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+}
+
+.secura-bar-btn:hover {
+  background: rgba(255, 255, 255, 0.16) !important;
+  border-top-color: rgba(255, 255, 255, 0.45) !important;
+  color: #ffffff !important;
+  transform: translateY(-1px) !important;
+}
+
+.secura-bar-btn.btn-simulate {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
+  color: #fca5a5 !important;
+}
+
+.secura-bar-btn.btn-simulate:hover {
+  background: rgba(239, 68, 68, 0.2) !important;
+  border-color: rgba(239, 68, 68, 0.4) !important;
+  color: #ffffff !important;
+}
+
+.secura-bar-btn.btn-stop {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #94a3b8 !important;
+}
+
+.secura-bar-btn.btn-stop:hover {
+  background: rgba(239, 68, 68, 0.4) !important;
+  border-color: rgba(239, 68, 68, 0.6) !important;
+  color: #ffffff !important;
+}
+
+/* 3. In-Page Grace Warning Modal - Apple Frosted Translucent */
+#secura-inpage-warning-modal {
+  position: fixed !important;
+  top: 64px !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  z-index: 2147483647 !important;
+  width: 460px !important;
+  max-width: 90vw !important;
+  background: rgba(18, 20, 26, 0.78) !important;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px) !important;
+  background-size: 16px 16px !important;
+  backdrop-filter: blur(40px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(40px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.32) !important;
+  border-radius: 20px !important;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 35px rgba(239, 68, 68, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.22) !important;
+  padding: 20px !important;
+  color: #ffffff !important;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif !important;
+  animation: securaFadeInSlide 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+}
+
+.secura-warn-header {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  margin-bottom: 10px !important;
+}
+
+.secura-warn-icon {
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 50% !important;
+  background: rgba(239, 68, 68, 0.18) !important;
+  border: 1px solid rgba(239, 68, 68, 0.4) !important;
+  color: #f87171 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 16px !important;
+  font-weight: 800 !important;
+  flex-shrink: 0 !important;
+}
+
+.secura-warn-title {
+  font-size: 14.5px !important;
+  font-weight: 700 !important;
+  color: #ffffff !important;
+  letter-spacing: -0.01em !important;
+}
+
+.secura-warn-strike-badge {
+  margin-left: auto !important;
+  font-size: 10.5px !important;
+  font-weight: 600 !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #fca5a5 !important;
+  padding: 2px 9px !important;
+  border-radius: 9999px !important;
+  border: 1px solid rgba(239, 68, 68, 0.3) !important;
+}
+
+.secura-warn-body {
+  font-size: 12px !important;
+  color: #cbd5e1 !important;
+  line-height: 1.5 !important;
+  margin-bottom: 14px !important;
+}
+
+.secura-countdown-wrapper {
+  margin-bottom: 14px !important;
+}
+
+.secura-countdown-label {
+  display: flex !important;
+  justify-content: space-between !important;
+  font-size: 11px !important;
+  color: #94a3b8 !important;
+  margin-bottom: 5px !important;
+  font-weight: 500 !important;
+}
+
+.secura-countdown-track {
+  width: 100% !important;
+  height: 5px !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-radius: 9999px !important;
+  overflow: hidden !important;
+}
+
+.secura-countdown-bar {
+  height: 100% !important;
+  background: rgba(255, 255, 255, 0.4) !important;
+  width: 100% !important;
+  border-radius: 9999px !important;
+  animation: securaGraceCountdown 10s linear forwards !important;
+}
+
+.secura-warn-actions {
+  display: flex !important;
+  gap: 10px !important;
+}
+
+.secura-btn-ack {
+  flex: 2 !important;
+  background: rgba(255, 255, 255, 0.16) !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  font-size: 12px !important;
+  padding: 9px 14px !important;
+  border: 1px solid rgba(255, 255, 255, 0.22) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.45) !important;
+  border-radius: 10px !important;
+  cursor: pointer !important;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.25) !important;
+}
+
+.secura-btn-ack:hover {
+  background: rgba(255, 255, 255, 0.24) !important;
+  border-top-color: rgba(255, 255, 255, 0.6) !important;
+  transform: translateY(-1px) !important;
+}
+
+.secura-btn-dismiss {
+  flex: 1 !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: #94a3b8 !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  padding: 9px 12px !important;
+  border: 1px solid rgba(255, 255, 255, 0.10) !important;
+  border-radius: 10px !important;
+  cursor: pointer !important;
+  transition: all 0.2s !important;
+}
+
+.secura-btn-dismiss:hover {
+  background: rgba(255, 255, 255, 0.10) !important;
+  color: #ffffff !important;
+}
+
+/* 4. Apple-Grade Interactive Post-OK Grace Timer HUD Pill */
+#secura-grace-hud-pill {
+  position: fixed !important;
+  top: 60px !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  z-index: 2147483647 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  padding: 9px 18px !important;
+  background: rgba(18, 20, 26, 0.75) !important;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px) !important;
+  background-size: 16px 16px !important;
+  backdrop-filter: blur(36px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(36px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.35) !important;
+  border-radius: 9999px !important;
+  box-shadow: 
+    0 16px 45px rgba(0, 0, 0, 0.45), 
+    inset 0 1px 0 rgba(255, 255, 255, 0.25) !important;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif !important;
+  color: #f1f5f9 !important;
+  font-size: 12px !important;
+  white-space: nowrap !important;
+  user-select: none !important;
+  animation: securaFadeInSlide 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+}
+
+.secura-grace-hud-ring {
+  width: 22px !important;
+  height: 22px !important;
+  position: relative !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.secura-grace-hud-sec {
+  font-size: 10px !important;
+  font-weight: 700 !important;
+  color: #38bdf8 !important;
+}
+
+.secura-grace-hud-text {
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  color: #e2e8f0 !important;
+}
+
+.secura-grace-hud-track {
+  width: 80px !important;
+  height: 4px !important;
+  background: rgba(255, 255, 255, 0.10) !important;
+  border-radius: 9999px !important;
+  overflow: hidden !important;
+}
+
+.secura-grace-hud-fill {
+  height: 100% !important;
+  background: rgba(255, 255, 255, 0.6) !important;
+  width: 100% !important;
+  border-radius: 9999px !important;
+  transition: width 0.1s linear !important;
+}
+

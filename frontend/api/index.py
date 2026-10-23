@@ -652,15 +652,19 @@ def compute_forensic_features(img: Image.Image, filename: str = "") -> dict:
         "spectral_var": synthid_ring_var
     }
 
-def score_image_pure_forensic(feat: dict, image: Image.Image = None, filename: str = "") -> tuple:
+def score_image_pure_forensic(feat: dict, image: Image.Image = None, filename: str = "", is_video_frame: bool = False) -> tuple:
     meta = feat.get("meta", {})
     
     # 1. Deterministic Generative Watermarks (hard evidence only; filename keywords alone never force a verdict)
-    if feat.get("has_sparkle"):
+    # Gemini sparkle is a static image overlay; it cannot appear on extracted video frames.
+    if feat.get("has_sparkle") and not is_video_frame:
         return 0.9850, "AI_GENERATED", "Google SynthID / Gemini visible sparkle watermark confirmed (Generative AI Engine)."
 
     # 2. Extreme Diffusion Signature
-    if feat["ela_mean"] > 3.0:
+    # For video frames the ELA threshold is raised to 7.0 because JPEG decode+re-encode during
+    # frame extraction already inflates ELA beyond 3.0 in normal real video content.
+    _ela_gate = 7.0 if is_video_frame else 3.0
+    if feat["ela_mean"] > _ela_gate:
         score = 0.9650
         return score, "AI_GENERATED", f"Severe frequency recompression gradient and diffusion latent synthesis confirmed (ELA Mean: {feat['ela_mean']:.2f}, Latent Grid: {feat['lattice_harmonic_ratio']:.3f})."
 
@@ -1008,10 +1012,11 @@ async def analyze_video(
 
 
     # If keyframe_img was not an image (e.g. raw MP4 upload) and OpenCV is available, decode it!
+    vid_suffix = os.path.splitext(fn)[1].lower() or ".mp4"
     if keyframe_img is None and HAS_CV2:
         try:
             import tempfile
-            with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+            with tempfile.NamedTemporaryFile(suffix=vid_suffix, delete=False) as tmp:
                 tmp.write(content)
                 tmp_name = tmp.name
             cap = cv2.VideoCapture(tmp_name)
@@ -1064,11 +1069,11 @@ async def analyze_video(
     if keyframe_img is None:
         keyframe_img = Image.new("RGB", (640, 360), color=(128, 128, 128))
         feat = compute_forensic_features(keyframe_img, file.filename or "")
-        score, verdict, summ = score_image_pure_forensic(feat, keyframe_img, file.filename or "")
+        score, verdict, summ = score_image_pure_forensic(feat, keyframe_img, file.filename or "", is_video_frame=True)
     else:
         # Run calibrated multi-spectral SynthID forensic classifier on actual keyframe
         feat = compute_forensic_features(keyframe_img, file.filename or "")
-        score, verdict, summ = score_image_pure_forensic(feat, keyframe_img, file.filename or "")
+        score, verdict, summ = score_image_pure_forensic(feat, keyframe_img, file.filename or "", is_video_frame=True)
 
     # --- Temporal multi-frame video forensics ---
     # Probe several frames across the timeline and score each one, instead of
@@ -1080,7 +1085,7 @@ async def analyze_video(
         tmp_vid_name = None
         try:
             import tempfile as _tempfile
-            with _tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as _tmp:
+            with _tempfile.NamedTemporaryFile(suffix=vid_suffix, delete=False) as _tmp:
                 _tmp.write(content)
                 tmp_vid_name = _tmp.name
             cap_v = cv2.VideoCapture(tmp_vid_name)
@@ -1099,7 +1104,7 @@ async def analyze_video(
                     if ret_v and f_v is not None:
                         pil_v = Image.fromarray(cv2.cvtColor(f_v, cv2.COLOR_BGR2RGB))
                         feat_v = compute_forensic_features(pil_v, fn)
-                        s_v, v_v, _ = score_image_pure_forensic(feat_v, pil_v, fn)
+                        s_v, v_v, _ = score_image_pure_forensic(feat_v, pil_v, fn, is_video_frame=True)
                         temporal_probes.append({
                             "timestamp": round(float(t_sec), 2),
                             "score": round(float(s_v), 4),

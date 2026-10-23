@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Secura AI</title>
+  <style>
+    /* ==========================================================================
+       Secura AI Chrome Extension - Master Design System
+       Brand Identity: Warm Cream (#FAF7F0), Deep Charcoal (#242321),
+       Warm Orange (#E98535), Light Mustard (#E5BD58), Muted Gray (#77736D),
+       Warm Borders (#E8E1D7), Authentic Green (#10B981), Threat Red (#EF4444)
+       ========================================================================== */
+    :root {
+      --bg-cream: #FAF7F0;
+      --surface-white: #FFFFFF;
+      --surface-card: #FFFFFF;
+      --surface-subtle: #F5EFEB;
+      --surface-elevated: #FFFFFF;
+      
+      --accent-orange: #E98535;
+      --accent-orange-hover: #D87424;
+      --accent-orange-light: #FDF3E9;
+      --accent-mustard: #E5BD58;
+      --accent-mustard-light: #FCF8ED;
+      
+      --text-main: #242321;
+      --text-muted: #77736D;
+      --text-tertiary: #A09C96;
+      --border-warm: #E8E1D7;
+      --border-light: #F0ECE4;
+      
+      --state-green: #10B981;
+      --state-green-bg: #ECFDF5;
+      --state-green-border: #A7F3D0;
+      
+      --state-amber: #F59E0B;
+      --state-amber-bg: #FFFBEB;
+      --state-amber-border: #FDE68A;
+      
+      --state-red: #EF4444;
+      --state-red-bg: #FEF2F2;
+      --state-red-border: #FECACA;
+      
+      --state-blue: #3B82F6;
+      --state-blue-bg: #EFF6FF;
+      --state-blue-border: #BFDBFE;
+      
+      --shadow-sm: 0 1px 2px rgba(36, 35, 33, 0.05);
+      --shadow-md: 0 4px 12px rgba(36, 35, 33, 0.08);
+      --shadow-lg: 0 10px 24px rgba(36, 35, 33, 0.12);
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-full: 9999px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      width: 400px;
+      min-height: 560px;
+      max-height: 600px;
+      background-color: var(--bg-cream);
+      color: var(--text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 13px;
+      line-height: 1.45;
+      overflow-y: auto;
+      overflow-x: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Scrollbar */
+    body::-webkit-scrollbar {
+      width: 5px;
+    }
+    body::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    body::-webkit-scrollbar-thumb {
+      background: #D5CEC4;
+      border-radius: var(--radius-full);
+    }
+
+    /* Header */
+    .app-header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: rgba(250, 247, 240, 0.94);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-warm);
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+
+    .brand-icon-shield {
+      width: 28px;
+      height: 28px;
+      background: linear-gradient(135deg, var(--accent-orange) 0%, var(--accent-mustard) 100%);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #FFFFFF;
+      box-shadow: 0 2px 6px rgba(233, 133, 53, 0.35);
+    }
+    .brand-icon-shield svg {
+      width: 16px;
+      height: 16px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2.2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .brand-title-wrap {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .brand-name {
+      font-size: 14.5px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .brand-badge {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      background: var(--surface-subtle);
+      color: var(--text-muted);
+      padding: 1px 6px;
+      border-radius: var(--radius-full);
+      border: 1px solid var(--border-warm);
+    }
+
+    /* Engine Status Pill */
+    .engine-status-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: var(--radius-full);
+      background: var(--surface-white);
+      border: 1px solid var(--border-warm);
+      color: var(--text-muted);
+      box-shadow: var(--shadow-sm);
+    }
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--text-tertiary);
+    }
+    .engine-status-pill.online .status-dot {
+      background: var(--state-green);
+      box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+    }
+    .engine-status-pill.online {
+      color: #065F46;
+      background: var(--state-green-bg);
+      border-color: var(--state-green-border);
+    }
+    .engine-status-pill.offline .status-dot {
+      background: var(--state-red);
+      box-shadow: 0 0 6px rgba(239, 68, 68, 0.6);
+    }
+    .engine-status-pill.offline {
+      color: #991B1B;
+      background: var(--state-red-bg);
+      border-color: var(--state-red-border);
+    }
+
+    /* Navigation Bar */
+    .nav-bar {
+      display: flex;
+      background: var(--surface-white);
+      border-bottom: 1px solid var(--border-warm);
+      padding: 3px 6px;
+      gap: 4px;
+    }
+
+    .nav-tab {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      padding: 8px 6px;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text-muted);
+      border: none;
+      background: transparent;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .nav-tab:hover {
+      color: var(--text-main);
+      background: var(--bg-cream);
+    }
+    .nav-tab.active {
+      color: var(--accent-orange);
+      background: var(--accent-orange-light);
+      font-weight: 700;
+    }
+    .nav-tab svg {
+      width: 14px;
+      height: 14px;
+      stroke-width: 2;
+    }
+
+    /* Main Container */
+    .tab-content {
+      padding: 14px 16px;
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+      flex: 1;
+    }
+    .tab-content.active {
+      display: flex;
+    }
+
+    /* Card Standard */
+    .card {
+      background: var(--surface-card);
+      border: 1px solid var(--border-warm);
+      border-radius: var(--radius-md);
+      padding: 14px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .card-header-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .card-title {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .card-desc {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      line-height: 1.4;
+      margin-bottom: 12px;
+    }
+
+    /* Primary & Secondary Buttons */
+    .btn-primary {
+      width: 100%;
+      background: var(--accent-orange);
+      color: #FFFFFF;
+      border: none;
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+      font-size: 12.5px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      cursor: pointer;
+      box-shadow: 0 2px 4px rgba(233, 133, 53, 0.25);
+      transition: all 0.15s ease;
+    }
+    .btn-primary:hover {
+      background: var(--accent-orange-hover);
+      box-shadow: 0 4px 8px rgba(233, 133, 53, 0.35);
+      transform: translateY(-1px);
+    }
+    .btn-primary:active {
+      transform: translateY(0);
+    }
+
+    .btn-secondary {
+      width: 100%;
+      background: var(--surface-white);
+      color: var(--text-main);
+      border: 1px solid var(--border-warm);
+      border-radius: var(--radius-sm);
+      padding: 9px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      cursor: pointer;
+      box-shadow: var(--shadow-sm);
+      transition: all 0.15s ease;
+    }
+    .btn-secondary:hover {
+      background: var(--surface-subtle);
+      border-color: #D8D0C5;
+    }
+
+    .btn-danger {
+      background: var(--state-red);
+      color: #FFFFFF;
+      border: none;
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+      font-size: 12.5px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      cursor: pointer;
+      box-shadow: 0 2px 4px rgba(239, 68, 68, 0.25);
+      transition: all 0.15s ease;
+    }
+    .btn-danger:hover {
+      background: #DC2626;
+      box-shadow: 0 4px 8px rgba(239, 68, 68, 0.35);
+    }
+
+    /* Live Screening Specific UI */
+    .screening-status-box {
+      background: var(--surface-subtle);
+      border: 1px solid var(--border-warm);
+      border-radius: var(--radius-sm);
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .screening-status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .screening-state-badge {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: var(--radius-full);
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .badge-ready {
+      background: #E2E8F0;
+      color: #475569;
+    }
+    .badge-active {
+      background: var(--state-green-bg);
+      color: #065F46;
+      border: 1px solid var(--state-green-border);
+      animation: pulseGreen 2s infinite;
+    }
+    .badge-alert {
+      background: var(--state-red-bg);
+      color: #991B1B;
+      border: 1px solid var(--state-red-border);
+      animation: pulseRed 1s infinite;
+    }
+    @keyframes pulseGreen {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+    @keyframes pulseRed {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.02); }
+    }
+
+    .screening-metrics-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 6px;
+      margin-top: 4px;
+    }
+    .metric-pill {
+      background: var(--surface-white);
+      border: 1px solid var(--border-warm);
+      border-radius: var(--radius-sm);
+      padding: 6px;
+      text-align: center;
+    }
+    .metric-val {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+    .metric-lbl {
+      font-size: 9.5px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      margin-top: 1px;
+    }
+
+    /* Dropzone for Media */
+    .dropzone {
+      border: 1.5px dashed var(--border-warm);
+      border-radius: var(--radius-md);
+      background: var(--surface-white);
+      padding: 20px 14px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      position: relative;
+    }
+    .dropzone:hover {
+      border-color: var(--accent-orange);
+      background: var(--accent-orange-light);
+    }
+    .dropzone-icon {
+      font-size: 24px;
+      margin-bottom: 6px;
+      color: var(--accent-orange);
+    }
+    .dropzone-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+    .dropzone-sub {
+      font-size: 10.5px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+    .file-input-hidden {
+      display: none;
+    }
+
+    /* Result Card Display */
+    .result-card {
+      background: var(--surface-white);
+      border: 1.5px solid var(--border-warm);
+      border-radius: var(--radius-md);
+      padding: 14px;
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+      box-shadow: var(--shadow-sm);
+    }
+    .result-card.visible {
+      display: flex;
+    }
+    .verdict-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .verdict-badge {
+      font-size: 12px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: var(--radius-sm);
+      letter-spacing: 0.02em;
+    }
+    .verdict-ai {
+      background: var(--state-red-bg);
+      color: #B91C1C;
+      border: 1px solid var(--state-red-border);
+    }
+    .verdict-real {
+      background: var(--state-green-bg);
+      color: #047857;
+      border: 1px solid var(--state-green-border);
+    }
+    .verdict-score {
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--text-main);
+    }
+    .score-caption {
+      font-size: 10.5px;
+      color: var(--text-muted);
+      margin-top: -2px;
+    }
+
+    .evidence-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+    .chip {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: var(--radius-sm);
+      background: var(--surface-subtle);
+      color: var(--text-muted);
+      border: 1px solid var(--border-warm);
+    }
+    .chip.highlight {
+      background: var(--accent-mustard-light);
+      color: #92400E;
+      border-color: #FCD34D;
+    }
+
+    .preview-thumb {
+      width: 100%;
+      max-height: 120px;
+      object-fit: cover;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-warm);
+    }
+
+    /* Plain Language Box */
+    .plain-language-box {
+      background: var(--surface-subtle);
+      border-left: 3px solid var(--accent-orange);
+      padding: 8px 10px;
+      font-size: 11px;
+      color: var(--text-main);
+      line-height: 1.4;
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    }
+
+    /* Loading Overlay */
+    .loading-overlay {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 8px;
+      padding: 20px;
+      text-align: center;
+    }
+    .loading-overlay.visible {
+      display: flex;
+    }
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border: 3px solid var(--border-warm);
+      border-top-color: var(--accent-orange);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .loading-text {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    /* Footer */
+    .app-footer {
+      margin-top: auto;
+      border-top: 1px solid var(--border-warm);
+      background: rgba(250, 247, 240, 0.95);
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .footer-link {
+      color: var(--accent-orange);
+      text-decoration: none;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .footer-link:hover {
+      text-decoration: underline;
+    }
+
+    /* History List Items */
+    .history-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-warm);
+      background: var(--surface-white);
+      margin-bottom: 6px;
+      font-size: 11.5px;
+    }
+    .history-type-badge {
+      font-size: 9.5px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: #E2E8F0;
+      color: #334155;
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="app-header">
+    <div class="brand-group">
+      <div class="brand-icon-shield" title="Secura AI Verification Shield">
+        <svg viewBox="0 0 24 24">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <path d="M9 12l2 2 4-4"/>
+        </svg>
+      </div>
+      <div class="brand-title-wrap">
+        <div class="brand-name">
+          Secura AI
+          <span class="brand-badge">Shield</span>
+        </div>
+      </div>
+    </div>
+    <div id="engineStatusBadge" class="engine-status-pill online">
+      <span class="status-dot"></span>
+      <span id="engineStatusText">Connected</span>
+    </div>
+  </header>
+
+  <!-- Navigation -->
+  <nav class="nav-bar">
+    <button class="nav-tab active" data-tab="tabScreening">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+        <line x1="8" y1="21" x2="16" y2="21"/>
+        <line x1="12" y1="17" x2="12" y2="21"/>
+      </svg>
+      Live Screen
+    </button>
+    <button class="nav-tab" data-tab="tabImage">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+        <circle cx="8.5" cy="8.5" r="1.5"/>
+        <polyline points="21 15 16 10 5 21"/>
+      </svg>
+      Image
+    </button>
+    <button class="nav-tab" data-tab="tabVideo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <polygon points="23 7 16 12 23 17 23 7"/>
+        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+      </svg>
+      Video
+    </button>
+    <button class="nav-tab" data-tab="tabSimilarity">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+        <line x1="16" y1="13" x2="8" y2="13"/>
+        <line x1="16" y1="17" x2="8" y2="17"/>
+      </svg>
+      Similarity
+    </button>
+    <button class="nav-tab" data-tab="tabSettings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+      Settings
+    </button>
+  </nav>
+
+  <!-- 1. LIVE SCREENING TAB -->
+  <div id="tabScreening" class="tab-content active">
+    <div class="card">
+      <div class="card-header-row">
+        <span class="card-title">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+          </svg>
+          Live Screen Sentinel
+        </span>
+        <span id="screeningStateBadge" class="screening-state-badge badge-ready">READY</span>
+      </div>
+      <p class="card-desc">
+        Real-time display capture monitoring for generative video, face swaps, and diffusion injection attacks.
+      </p>
+
+      <div class="screening-status-box">
+        <div class="screening-status-row">
+          <span style="font-size: 11px; color: var(--text-muted);">Session Duration:</span>
+          <strong id="sessionTimerText" style="font-size: 13px; font-family: ui-monospace, monospace;">00:00</strong>
+        </div>
+        <div class="screening-status-row">
+          <span style="font-size: 11px; color: var(--text-muted);">Capture Target:</span>
+          <span id="captureTargetText" style="font-size: 11px; font-weight: 600;">Current Tab / Desktop</span>
+        </div>
+
+        <div class="screening-metrics-grid">
+          <div class="metric-pill">
+            <div id="metricFramesCount" class="metric-val">0</div>
+            <div class="metric-lbl">Frames</div>
+          </div>
+          <div class="metric-pill">
+            <div id="metricAlertsCount" class="metric-val">0</div>
+            <div class="metric-lbl">Alerts</div>
+          </div>
+          <div class="metric-pill">
+            <div id="metricFpsVal" class="metric-val">~4</div>
+            <div class="metric-lbl">FPS Target</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
+        <button id="btnStartScreening" class="btn-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+          </svg>
+          Start Live Screening
+        </button>
+        <button id="btnStopScreening" class="btn-danger" style="display: none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="6" width="12" height="12"/>
+          </svg>
+          Stop Live Screening
+        </button>
+        <button id="btnOpenSentinelFull" class="btn-secondary">
+          <span>⛶</span> Open Dedicated Sentinel Monitor
+        </button>
+      </div>
+    </div>
+
+    <!-- Alert / Notice Box -->
+    <div class="plain-language-box">
+      <strong>Privacy &amp; Safety:</strong> Screen capture occurs only with your explicit permission. Frames are evaluated through your local Secura AI backend and are never retained.
+    </div>
+  </div>
+
+  <!-- 2. IMAGE FORENSIC SCAN TAB -->
+  <div id="tabImage" class="tab-content">
+    <div class="card">
+      <span class="card-title">Image Forensic Analysis</span>
+      <p class="card-desc">
+        Multi-architecture detection fusing Swin Transformer patch self-attention, CLIP ViT-L/14 linear probing, and camera sensor noise forensics.
+      </p>
+
+      <div id="imageDropzone" class="dropzone">
+        <div class="dropzone-icon">🖼️</div>
+        <div class="dropzone-title">Click to select or drop an image</div>
+        <div class="dropzone-sub">Supports JPEG, PNG, WebP (Up to 25MB)</div>
+        <input type="file" id="imageFileInput" class="file-input-hidden" accept="image/jpeg,image/png,image/webp">
+      </div>
+
+      <button id="btnInspectPageImage" class="btn-secondary" style="margin-top: 10px;">
+        <span>🔍</span> Click Image on Current Webpage to Scan
+      </button>
+    </div>
+
+    <!-- Loading State -->
+    <div id="imageLoadingState" class="loading-overlay">
+      <div class="spinner"></div>
+      <div class="loading-text">Analyzing Image with Secura Vision Core...</div>
+      <div style="font-size: 11px; color: var(--text-muted);">Running Swin-B &amp; CLIP ViT-L/14 Consensus</div>
+    </div>
+
+    <!-- Image Result Card -->
+    <div id="imageResultCard" class="result-card">
+      <img id="imageResultThumb" class="preview-thumb" alt="Analyzed Media">
+      <div class="verdict-header">
+        <div>
+          <span id="imageVerdictBadge" class="verdict-badge verdict-ai">AI GENERATED</span>
+          <div id="imageScoreSubtitle" class="score-caption" style="margin-top: 4px;">Calibrated Consensus Score</div>
+        </div>
+        <div style="text-align: right;">
+          <div id="imageScoreValue" class="verdict-score">98%</div>
+          <div class="score-caption">Threshold: 50%</div>
+        </div>
+      </div>
+
+      <div class="plain-language-box" id="imagePlainExplanation">
+        Secura AI detected synthetic diffusion lattice artifacts and generative window textures.
+      </div>
+
+      <div class="evidence-chips" id="imageEvidenceChips">
+        <span class="chip highlight" id="chipSwin">Swin: 94.2%</span>
+        <span class="chip" id="chipClip">CLIP: 82.5%</span>
+        <span class="chip" id="chipExif">EXIF: Verified</span>
+        <span class="chip" id="chipC2pa">C2PA: None</span>
+      </div>
+
+      <button id="btnViewFullImageReport" class="btn-secondary">
+        View Detailed Forensics in Enterprise Suite &rarr;
+      </button>
+    </div>
+  </div>
+
+  <!-- 3. VIDEO FORENSIC SCAN TAB -->
+  <div id="tabVideo" class="tab-content">
+    <div class="card">
+      <span class="card-title">Video Temporal Forensics</span>
+      <p class="card-desc">
+        Evaluates inter-frame sensor noise residual consistency (PRNU), optical flow continuity, and sampled keyframe diffusion signatures.
+      </p>
+
+      <div id="videoDropzone" class="dropzone">
+        <div class="dropzone-icon">🎥</div>
+        <div class="dropzone-title">Click to select or drop a video</div>
+        <div class="dropzone-sub">Supports MP4, WebM (H.264 / VP9)</div>
+        <input type="file" id="videoFileInput" class="file-input-hidden" accept="video/mp4,video/webm">
+      </div>
+    </div>
+
+    <!-- Loading State -->
+    <div id="videoLoadingState" class="loading-overlay">
+      <div class="spinner"></div>
+      <div class="loading-text">Sampling Video Keyframes...</div>
+      <div style="font-size: 11px; color: var(--text-muted);">Extracting temporal residuals and Swin features</div>
+    </div>
+
+    <!-- Video Result Card -->
+    <div id="videoResultCard" class="result-card">
+      <div class="verdict-header">
+        <div>
+          <span id="videoVerdictBadge" class="verdict-badge verdict-ai">AI GENERATED</span>
+          <div id="videoFilename" class="score-caption" style="margin-top: 4px;">sample_video.mp4</div>
+        </div>
+        <div style="text-align: right;">
+          <div id="videoScoreValue" class="verdict-score">92%</div>
+          <div id="videoKeyframesCount" class="score-caption">12 Keyframes</div>
+        </div>
+      </div>
+
+      <div class="plain-language-box" id="videoPlainExplanation">
+        Synthetic inter-frame variance and generative optical flow incoherence detected across sampled frames.
+      </div>
+
+      <!-- Video Diagnostic Chips -->
+      <div class="evidence-chips" id="videoEvidenceChips" style="margin: 10px 0;">
+        <span class="chip highlight" id="chipVideoTemporal">ReStraV: 0.1%</span>
+        <span class="chip" id="chipVideoSpatial">Swin Diffusion: 14%</span>
+        <span class="chip" id="chipVideoMotion">Motion Flow: Stable</span>
+        <span class="chip" id="chipVideoNoise">Noise Floor: Valid</span>
+      </div>
+
+      <!-- Sampled Keyframes Thumbnail Strip -->
+      <div id="videoThumbnailsSection" style="margin-top: 10px; display: none;">
+        <div style="font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px;">Sampled Keyframes:</div>
+        <div id="videoThumbnailsStrip" style="display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px;"></div>
+      </div>
+
+      <button id="btnViewFullVideoReport" class="btn-secondary" style="margin-top: 8px;">
+        View Video Timeline &amp; Keyframes in Enterprise Suite &rarr;
+      </button>
+    </div>
+  </div>
+
+  <!-- 4. CONTENT SIMILARITY TAB -->
+  <div id="tabSimilarity" class="tab-content">
+    <div class="card">
+      <span class="card-title">Content &amp; Policy Similarity Check</span>
+      <p class="card-desc">
+        Analyzes media reuse via 64-bit perceptual hashing (pHash/dHash/aHash) and queries official statutory compliance guidelines.
+      </p>
+
+      <textarea id="similarityTextInput" style="width: 100%; height: 70px; border: 1px solid var(--border-warm); border-radius: var(--radius-sm); padding: 8px; font-size: 12px; font-family: inherit; resize: none; margin-bottom: 8px;" placeholder="Paste text or claim to verify against official IT Rules and policy statutes..."></textarea>
+
+      <button id="btnRunSimilarityCheck" class="btn-primary">
+        <span>📑</span> Query Policy &amp; Similarity RAG
+      </button>
+    </div>
+
+    <!-- Similarity Results -->
+    <div id="similarityResultBox" class="result-card">
+      <div class="verdict-header">
+        <span class="verdict-badge verdict-real" id="similarityBadge">POLICY GROUNDED</span>
+        <span style="font-size: 11px; color: var(--text-muted);" id="similarityScoreText">Semantic Match: 88%</span>
+      </div>
+      <div class="plain-language-box" id="similarityExcerptBox" style="border-left-color: var(--state-blue);">
+        Rule 3(1)(b)(v) of Information Technology (Intermediary Guidelines) Rules, 2021: Prohibits deceptive synthetic media and patently false misinformation.
+      </div>
+      <div style="font-size: 10.5px; color: var(--text-muted); line-height: 1.4;">
+        <strong>Responsible Disclosure:</strong> Similarity matching reflects textual, conceptual, or perceptual overlap against known indices. A similarity score does not prove plagiarism or malicious intent.
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. SETTINGS & RECENT HISTORY TAB -->
+  <div id="tabSettings" class="tab-content">
+    <div class="card">
+      <span class="card-title">Extension Settings</span>
+      <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
+        <div>
+          <label style="font-size: 11px; font-weight: 600; color: var(--text-muted);">Forensic Engine API Base URL:</label>
+          <input type="text" id="settingApiUrl" value="http://127.0.0.1:8000" style="width: 100%; padding: 6px 8px; font-size: 12px; border: 1px solid var(--border-warm); border-radius: 6px; margin-top: 3px;">
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <span style="font-size: 12px; font-weight: 600;">Play Alert Sounds on Threats</span>
+          <input type="checkbox" id="settingSoundToggle" checked>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <span style="font-size: 12px; font-weight: 600;">Decision Threshold (tau = 0.50)</span>
+          <span style="font-size: 11px; font-weight: 700; color: var(--accent-orange);">ISO 27037 Invariant</span>
+        </div>
+        <button id="btnSaveSettings" class="btn-secondary" style="margin-top: 4px;">Save Settings</button>
+      </div>
+    </div>
+
+    <!-- Recent Scans History -->
+    <div class="card">
+      <div class="card-header-row">
+        <span class="card-title">Recent Scans History</span>
+        <button id="btnClearHistory" style="background: none; border: none; font-size: 10.5px; color: var(--accent-orange); font-weight: 600; cursor: pointer;">Clear History</button>
+      </div>
+      <div id="historyListContainer">
+        <div style="text-align: center; color: var(--text-tertiary); font-size: 11px; padding: 12px 0;">No recent scans yet</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="app-footer">
+    <span>Secura AI &bull; Certified Local Inference</span>
+    <a id="linkOpenSuiteFooter" class="footer-link">Open Full Suite &rarr;</a>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

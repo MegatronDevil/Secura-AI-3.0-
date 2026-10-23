@@ -420,6 +420,8 @@ class Milestone1Response(BaseModel):
     unified_report: Optional[UnifiedForensicReport] = Field(default=None, description="Unified, explainable evidence-fusion report consolidating all forensic signals")
     ai_detection: Optional[AIDetectorResult] = Field(default=None, description='Dedicated AI-generated image detection result')
     synthid_provenance: Optional[SynthIDProvenanceResult] = Field(default=None, description="SynthID imperceptible watermark and screenshot resilience forensics")
+    corneal_reflections: Optional[Dict[str, Any]] = Field(default=None, description="Physical optics corneal reflection and specular highlight symmetry analysis")
+    perceptual_hashes: Optional[Dict[str, Any]] = Field(default=None, description="Robust 64-bit DCT perceptual hash, dHash, and reverse search lookup references")
     canonical_verdict: Optional[CanonicalBinaryVerdict] = Field(default=None, description="Mission 22 Consumer-First Canonical Binary Decision")
     component_errors: List[ComponentError] = Field(default_factory=list, description="Non-fatal component-level errors if any")
     disclaimer: str = Field(

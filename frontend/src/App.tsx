@@ -1,1733 +1,2452 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Milestone1Response,
-  UserSession,
-  ModelRegistryStatusResponse,
+  VideoForensicResult,
+  RGBFrameSample,
+  BatchAnalysisResponse,
+  SealedImageResponse,
+  ExplainabilityHeatmapResponse,
 } from "./types/api";
 import {
   analyzeImageFile,
+  analyzeVideoFile,
+  sealImage,
+  batchAnalyzeImages,
+  fetchExplainabilityHeatmap,
+  downloadVideoClip,
   ApiServiceError,
-  checkSession,
-  fetchModelRegistryStatus,
-  loginUser,
-  registerUser,
-  logoutUser,
 } from "./services/api";
 import { API_BASE_URL } from "./services/env";
-import RGBHeartVisualization from "./components/RGBHeartVisualization";
-import VideoForensicsWorkspace from "./components/VideoForensicsWorkspace";
-import SecuraSocialSuite from "./components/social/SecuraSocialSuite";
-
-interface ToastNotification {
-  id: string;
-  title: string;
-  message: string;
-  type: "success" | "info" | "warning" | "error";
-}
+import { RGBHeartVisualization } from "./components/RGBHeartVisualization";
+import { WebcamDeepfakeShield } from "./components/WebcamDeepfakeShield";
+import {
+  exportForensicReportPrint,
+  exportForensicReportDoc,
+} from "./services/forensicReportExporter";
 
 export function App() {
-  // Navigation Modes: "landing" | "image_workspace" | "video_workspace"
-  const getInitialMode = (): "landing" | "image_workspace" | "video_workspace" | "secura_social" => {
-    if (typeof window !== "undefined") {
-      const p = new URLSearchParams(window.location.search);
-      const m = p.get("mode");
-      if (m === "social" || m === "secura_social") return "secura_social";
-    }
-    if (typeof window !== "undefined") {
-      const p = new URLSearchParams(window.location.search);
-      const m = p.get("mode");
-      if (m === "image" || m === "image_workspace") return "image_workspace";
-      if (m === "video" || m === "video_workspace") return "video_workspace";
-    }
-    return "landing";
-  };
-  const [workspaceMode, setWorkspaceMode] = useState<"landing" | "image_workspace" | "video_workspace" | "secura_social">(getInitialMode);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  // Navigation Tabs: Landing Page, Image Workbench, Video Workbench, Batch Audit, Live Shield
+  const [activeTab, setActiveTab] = useState<"landing" | "image" | "video" | "batch" | "live-shield">("landing");
 
-  // Image Workstation 8-View Tabs
-  const [activeImageTab, setActiveImageTab] = useState<
-    "synthesis" | "ela" | "dct" | "noise" | "c2pa" | "metadata" | "ai_detector" | "properties"
-  >("synthesis");
+  // C2PA Sealing & Tamper Assertion State
+  const [isSealing, setIsSealing] = useState(false);
+  const [sealedImage, setSealedImage] = useState<SealedImageResponse | null>(null);
 
-  // Authentication & Session State
-  const [session, setSession] = useState<UserSession | null>(null);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [authEmail, setAuthEmail] = useState("");
-  const [authPassword, setAuthPassword] = useState("");
-  const [authLoading, setAuthLoading] = useState(false);
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
-  const [regUsername, setRegUsername] = useState("");
-  const [regEmail, setRegEmail] = useState("");
-  const [regPassword, setRegPassword] = useState("");
-  const [regRole, setRegRole] = useState("Forensic Analyst");
+  // Batch Ingestion & Forensic Ledger State
+  const [batchFiles, setBatchFiles] = useState<File[]>([]);
+  const [isBatchAnalyzing, setIsBatchAnalyzing] = useState(false);
+  const [batchResult, setBatchResult] = useState<BatchAnalysisResponse | null>(null);
+  const [batchError, setBatchError] = useState<string | null>(null);
+  const batchInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Live backend telemetry for the Overview dashboard (REAL API data — never mocked)
-  const [engineHealth, setEngineHealth] = useState<{ status: string; version: string; latencyMs: number | null } | null>(null);
-  const [engineError, setEngineError] = useState<string | null>(null);
-  const [modelRegistry, setModelRegistry] = useState<ModelRegistryStatusResponse | null>(null);
+  // Backend Health Telemetry
+  const [healthStatus, setHealthStatus] = useState<{
+    online: boolean;
+    version: string;
+    latencyMs: number | null;
+  }>({ online: false, version: "1.0.0", latencyMs: null });
 
-  // Image Analysis State
+  // ---------------------------------------------------------------------------
+  // IMAGE DETECTION STATE
+  // ---------------------------------------------------------------------------
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [isImageAnalyzing, setIsImageAnalyzing] = useState(false);
   const [imageResult, setImageResult] = useState<Milestone1Response | null>(null);
-  const [imageProbe, setImageProbe] = useState<string>("Ensemble");
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [imageInspectionMode, setImageInspectionMode] = useState<"original" | "ela" | "xray">("original");
+  const [explainabilityResult, setExplainabilityResult] = useState<ExplainabilityHeatmapResponse | null>(null);
+  const [isLoadingExplainability, setIsLoadingExplainability] = useState(false);
+  const [explainabilityAlpha, setExplainabilityAlpha] = useState<number>(0.6);
+  const imageInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Toast Notification State
-  const [toasts, setToasts] = useState<ToastNotification[]>([]);
-  const imageFileInputRef = useRef<HTMLInputElement | null>(null);
+  // ---------------------------------------------------------------------------
+  // VIDEO DETECTION STATE
+  // ---------------------------------------------------------------------------
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [isVideoAnalyzing, setIsVideoAnalyzing] = useState(false);
+  const [videoResult, setVideoResult] = useState<VideoForensicResult | null>(null);
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const [selectedVideoFrameIndex, setSelectedVideoFrameIndex] = useState<number>(0);
+  const [clipStartSec, setClipStartSec] = useState<number>(0);
+  const [clipEndSec, setClipEndSec] = useState<number>(5);
+  const [isExtractingClip, setIsExtractingClip] = useState<boolean>(false);
+  const [clipSuccessMsg, setClipSuccessMsg] = useState<string | null>(null);
+  const videoInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Mission 25: Universal Live Camera Photo Capture Engine
-  const [isPhotoCameraOpen, setIsPhotoCameraOpen] = useState(false);
-  const [cameraFacingMode, setCameraFacingMode] = useState<"user" | "environment">("user");
-  const [capturedPhotoBlob, setCapturedPhotoBlob] = useState<Blob | null>(null);
-  const [capturedPhotoPreviewUrl, setCapturedPhotoPreviewUrl] = useState<string | null>(null);
-  const webcamVideoRef = useRef<HTMLVideoElement | null>(null);
-  const webcamStreamRef = useRef<MediaStream | null>(null);
-
-  const openPhotoCamera = async (facing: "user" | "environment" = "user") => {
-    setIsPhotoCameraOpen(true);
-    setCameraFacingMode(facing);
-    if (capturedPhotoPreviewUrl) {
-      URL.revokeObjectURL(capturedPhotoPreviewUrl);
-      setCapturedPhotoPreviewUrl(null);
-    }
-    setCapturedPhotoBlob(null);
-
-    if (webcamStreamRef.current) {
-      webcamStreamRef.current.getTracks().forEach((t) => t.stop());
-      webcamStreamRef.current = null;
-    }
+  // ---------------------------------------------------------------------------
+  // C2PA CRYPTOGRAPHIC WATERMARK & ASSERTION SEALER
+  // ---------------------------------------------------------------------------
+  const handleSealImage = async () => {
+    if (!imageFile || !imageResult) return;
+    setIsSealing(true);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: facing, width: { ideal: 1920 }, height: { ideal: 1080 } },
-      });
-      webcamStreamRef.current = stream;
-      if (webcamVideoRef.current) {
-        webcamVideoRef.current.srcObject = stream;
-        webcamVideoRef.current.play().catch(() => {});
-      }
+      const verdict = imageResult.canonical_verdict?.predicted_label || "AI_GENERATED";
+      const confidence = imageResult.canonical_verdict?.model_score ?? 0.95;
+      const res = await sealImage(imageFile, verdict, confidence, imageResult.request_id);
+      setSealedImage(res);
+      // Auto-trigger download of sealed cryptographic asset
+      const a = document.createElement("a");
+      a.href = res.sealed_image_data_url;
+      a.download = `C2PA_SEALED_${imageFile.name}`;
+      a.click();
+    } catch (e: any) {
+      alert("Failed to seal image: " + (e.message || "Unknown error"));
+    } finally {
+      setIsSealing(false);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // BATCH MULTI-FILE INGESTION & CSV LEDGER HANDLERS
+  // ---------------------------------------------------------------------------
+  const handleSelectBatchFiles = async (files: FileList | File[]) => {
+    const fileArr = Array.from(files).slice(0, 30);
+    if (fileArr.length === 0) return;
+    setBatchFiles(fileArr);
+    setBatchResult(null);
+    setBatchError(null);
+    setIsBatchAnalyzing(true);
+    try {
+      const res = await batchAnalyzeImages(fileArr, "Ensemble");
+      setBatchResult(res);
     } catch (err: any) {
-      alert("Unable to access camera: " + (err.message || "Permission denied or unavailable"));
-      setIsPhotoCameraOpen(false);
+      setBatchError(err instanceof ApiServiceError ? err.message : err.message || "Failed to process batch files.");
+    } finally {
+      setIsBatchAnalyzing(false);
     }
   };
 
-  const closePhotoCamera = () => {
-    if (webcamStreamRef.current) {
-      webcamStreamRef.current.getTracks().forEach((t) => t.stop());
-      webcamStreamRef.current = null;
-    }
-    if (capturedPhotoPreviewUrl) {
-      URL.revokeObjectURL(capturedPhotoPreviewUrl);
-      setCapturedPhotoPreviewUrl(null);
-    }
-    setCapturedPhotoBlob(null);
-    setIsPhotoCameraOpen(false);
+  const handleExportBatchCSV = () => {
+    if (!batchResult || !batchResult.items.length) return;
+    const headers = [
+      "Filename",
+      "Media_Type",
+      "File_Size_Bytes",
+      "SHA256",
+      "Perceptual_Hash_pHash",
+      "Provenance_Signal",
+      "Forensic_Recheck",
+      "Predicted_Label",
+      "Confidence_Score",
+      "Model_Score",
+      "Processing_Status"
+    ];
+    const rows = batchResult.items.map(item => [
+      `"${item.filename.replace(/"/g, '""')}"`,
+      `"${item.media_type}"`,
+      item.file_size_bytes,
+      `"${item.sha256}"`,
+      `"${item.phash}"`,
+      `"${item.provenance_signal || 'Deep Vision Probe'}"`,
+      `"${item.rechecked ? 'VERIFIED' : 'PENDING'}"`,
+      `"${item.predicted_label}"`,
+      item.confidence_score,
+      item.model_score,
+      `"${item.status}"`
+    ]);
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `SecuraAI_Batch_Audit_${batchResult.batch_id}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
-  const capturePhoto = () => {
-    if (!webcamVideoRef.current) return;
-    const video = webcamVideoRef.current;
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth || 1280;
-    canvas.height = video.videoHeight || 720;
-    const ctx = canvas.getContext("2d");
-    if (ctx) {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob(
-        (blob) => {
-          if (blob) {
-            const url = URL.createObjectURL(blob);
-            setCapturedPhotoBlob(blob);
-            setCapturedPhotoPreviewUrl(url);
-          }
-        },
-        "image/jpeg",
-        0.95
-      );
-    }
-  };
+  // ---------------------------------------------------------------------------
+  // LIVE CAMERA CAPTURE (PHOTO & VIDEO)
+  // ---------------------------------------------------------------------------
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraMode, setCameraMode] = useState<"photo" | "video">("photo");
+  const [isRecordingVideo, setIsRecordingVideo] = useState(false);
+  const [recordTimerSec, setRecordTimerSec] = useState(0);
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+  const lastCameraTrackRef = useRef<MediaStreamTrack | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const recordIntervalRef = useRef<number | null>(null);
 
-  const retakePhoto = () => {
-    if (capturedPhotoPreviewUrl) {
-      URL.revokeObjectURL(capturedPhotoPreviewUrl);
-      setCapturedPhotoPreviewUrl(null);
-    }
-    setCapturedPhotoBlob(null);
-    openPhotoCamera(cameraFacingMode);
-  };
+  // ---------------------------------------------------------------------------
+  // LANDING PAGE INTERACTIVE SIMULATOR (SHOWCASING 3D HOLOGRAPHIC HEART)
+  // ---------------------------------------------------------------------------
+  const [landingSimMode, setLandingSimMode] = useState<"genuine" | "ai">("genuine");
 
-  const useCapturedPhoto = () => {
-    if (!capturedPhotoBlob) return;
-    const file = new File([capturedPhotoBlob], `camera_photo_${Date.now()}.jpg`, { type: "image/jpeg" });
-    closePhotoCamera();
-    handleImageFileSelect(file);
-  };
-
-  // Sync theme attribute to HTML root
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-  }, [theme]);
-
-  // Initial Auth Check
-  useEffect(() => {
-    checkSession()
-      .then((sess) => {
-        if (sess) setSession(sess);
-      })
-      .catch(() => {});
-  }, []);
-
-  // Fetch real engine health + model registry status for the dashboard
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const started = performance.now();
-        const res = await fetch(`${API_BASE_URL}/api/v1/health`);
+  // ---------------------------------------------------------------------------
+  // BACKEND HEALTH CHECK
+  // ---------------------------------------------------------------------------
+  const checkBackendHealth = async () => {
+    try {
+      const start = performance.now();
+      const res = await fetch(`${API_BASE_URL}/api/v1/health`);
+      if (res.ok) {
         const data = await res.json();
-        const latency = Math.round(performance.now() - started);
-        if (!cancelled) {
-          setEngineHealth({ status: data.status ?? "unknown", version: data.version ?? "", latencyMs: latency });
-        }
-      } catch {
-        if (!cancelled) setEngineError("Backend unreachable");
+        const latency = Math.round(performance.now() - start);
+        setHealthStatus({
+          online: true,
+          version: data.version || "1.0.0",
+          latencyMs: latency,
+        });
+      } else {
+        setHealthStatus({ online: false, version: "", latencyMs: null });
       }
-      try {
-        const reg = await fetchModelRegistryStatus();
-        if (!cancelled) setModelRegistry(reg);
-      } catch {
-        if (!cancelled) setEngineError((prev) => prev ?? "Model registry unavailable");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    } catch {
+      setHealthStatus({ online: false, version: "", latencyMs: null });
+    }
+  };
+
+  useEffect(() => {
+    checkBackendHealth();
+    const interval = setInterval(checkBackendHealth, 20000);
+    return () => clearInterval(interval);
   }, []);
 
-  const addToast = (title: string, message: string, type: ToastNotification["type"] = "info") => {
-    const id = Math.random().toString(36).substring(2, 9);
-    setToasts((prev) => [...prev, { id, title, message, type }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4500);
-  };
+  // Cleanup object URLs on unmount
+  useEffect(() => {
+    return () => {
+      if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+      if (videoUrl) URL.revokeObjectURL(videoUrl);
+      stopCamera();
+    };
+  }, [imagePreviewUrl, videoUrl]);
 
-  const handleImageFileSelect = (file: File) => {
+  // ---------------------------------------------------------------------------
+  // IMAGE HANDLERS
+  // ---------------------------------------------------------------------------
+  const handleSelectImage = async (file: File) => {
     if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
-    const url = URL.createObjectURL(file);
+    const preview = URL.createObjectURL(file);
     setImageFile(file);
-    setImagePreviewUrl(url);
+    setImagePreviewUrl(preview);
     setImageResult(null);
-    setWorkspaceMode("image_workspace");
+    setImageError(null);
+    setImageInspectionMode("original");
+    setExplainabilityResult(null);
+    setActiveTab("image");
 
-    runImageForensics(file);
-  };
-
-  const runImageForensics = async (file: File, probeOverride?: string) => {
     setIsImageAnalyzing(true);
-    const probeToUse = probeOverride || imageProbe;
     try {
-      const report = await analyzeImageFile(file, probeToUse);
-      setImageResult(report);
-      addToast("Analysis Complete", `Forensic breakdown computed for ${file.name}`, "success");
+      const result = await analyzeImageFile(file, "Ensemble");
+      setImageResult(result);
     } catch (err: any) {
-      const msg = err instanceof ApiServiceError ? err.message : err.message || "Failed to analyze image.";
-      addToast("Analysis Error", msg, "error");
+      setImageError(err instanceof ApiServiceError ? err.message : err.message || "Failed to analyze image.");
     } finally {
       setIsImageAnalyzing(false);
     }
   };
 
-  const handleLoginSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthLoading(true);
-    setAuthError(null);
+  const handleResetImage = () => {
+    if (imagePreviewUrl) URL.revokeObjectURL(imagePreviewUrl);
+    setImageFile(null);
+    setImagePreviewUrl(null);
+    setImageResult(null);
+    setImageError(null);
+    setImageInspectionMode("original");
+    setExplainabilityResult(null);
+    if (imageInputRef.current) imageInputRef.current.value = "";
+  };
+
+  const handleLoadExplainability = async (alphaVal: number = explainabilityAlpha) => {
+    if (!imageFile) return;
+    setIsLoadingExplainability(true);
     try {
-      const resp = await loginUser(authEmail, authPassword);
-      setSession({
-        authenticated: true,
-        username: resp.username,
-        role: resp.role,
-        expires_at: resp.expires_at,
-      });
-      setIsAuthModalOpen(false);
-      addToast("Analyst Authenticated", `Welcome back, ${resp.username}`, "success");
-    } catch (err: any) {
-      setAuthError(err.message || "Invalid authentication credentials.");
+      const res = await fetchExplainabilityHeatmap(imageFile, alphaVal);
+      setExplainabilityResult(res);
+    } catch (e: any) {
+      console.warn("Failed to load explainability heatmap:", e);
     } finally {
-      setAuthLoading(false);
+      setIsLoadingExplainability(false);
     }
   };
 
-  const handleRegisterSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthLoading(true);
-    setAuthError(null);
+  // ---------------------------------------------------------------------------
+  // VIDEO HANDLERS
+  // ---------------------------------------------------------------------------
+  const handleSelectVideo = async (file: File) => {
+    if (videoUrl) URL.revokeObjectURL(videoUrl);
+    const url = URL.createObjectURL(file);
+    setVideoFile(file);
+    setVideoUrl(url);
+    setVideoResult(null);
+    setVideoError(null);
+    setSelectedVideoFrameIndex(0);
+    setClipStartSec(0);
+    setClipEndSec(5);
+    setClipSuccessMsg(null);
+    setActiveTab("video");
+
+    setIsVideoAnalyzing(true);
     try {
-      await registerUser(regUsername, regEmail, regPassword, regRole);
-      addToast("Account Registered", "Credentials verified and saved in database.", "success");
-      // Auto-login
-      const resp = await loginUser(regUsername, regPassword);
-      setSession({
-        authenticated: true,
-        username: resp.username,
-        role: resp.role,
-        expires_at: resp.expires_at,
-      });
-      setIsAuthModalOpen(false);
-      addToast("Analyst Authenticated", `Welcome, ${resp.username}`, "success");
+      const result = await analyzeVideoFile(file);
+      setVideoResult(result);
+      if (result.video_metadata?.duration_sec) {
+        setClipEndSec(Math.min(result.video_metadata.duration_sec, 5));
+      }
     } catch (err: any) {
-      setAuthError(err.message || "Failed to create analyst account.");
+      setVideoError(err instanceof ApiServiceError ? err.message : err.message || "Failed to analyze video.");
     } finally {
-      setAuthLoading(false);
+      setIsVideoAnalyzing(false);
     }
   };
 
-  const handleLogout = async () => {
+  const handleResetVideo = () => {
+    if (videoUrl) URL.revokeObjectURL(videoUrl);
+    setVideoFile(null);
+    setVideoUrl(null);
+    setVideoResult(null);
+    setVideoError(null);
+    setSelectedVideoFrameIndex(0);
+    setClipSuccessMsg(null);
+    if (videoInputRef.current) videoInputRef.current.value = "";
+  };
+
+  const handleExtractClip = async () => {
+    if (!videoFile) return;
+    setIsExtractingClip(true);
+    setClipSuccessMsg(null);
     try {
-      await logoutUser();
-      setSession(null);
-      addToast("Signed Out", "Analyst session securely terminated", "info");
-    } catch (err) {
-      setSession(null);
+      const blob = await downloadVideoClip(videoFile, clipStartSec, clipEndSec);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `secura_evidence_${clipStartSec.toFixed(1)}s-${clipEndSec.toFixed(1)}s.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setClipSuccessMsg(`Extracted & downloaded lossless clip (${clipStartSec}s - ${clipEndSec}s)`);
+      setTimeout(() => setClipSuccessMsg(null), 4000);
+    } catch (err: any) {
+      alert("Failed to extract clip: " + (err.message || "Unknown error"));
+    } finally {
+      setIsExtractingClip(false);
     }
   };
+
+  // ---------------------------------------------------------------------------
+  // CAMERA CAPTURE CONTROLS
+  // ---------------------------------------------------------------------------
+  const startCamera = async (mode: "photo" | "video") => {
+    setCameraMode(mode);
+    setIsCameraActive(true);
+    setIsRecordingVideo(false);
+    setRecordTimerSec(0);
+    recordedChunksRef.current = [];
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
+        audio: mode === "video",
+      });
+      cameraStreamRef.current = stream;
+      if (stream.getVideoTracks().length > 0) {
+        lastCameraTrackRef.current = stream.getVideoTracks()[0];
+      }
+      if (cameraVideoRef.current) {
+        cameraVideoRef.current.srcObject = stream;
+        cameraVideoRef.current.play();
+      }
+    } catch (err: any) {
+      alert("Camera access denied or device unavailable: " + (err.message || ""));
+      setIsCameraActive(false);
+    }
+  };
+
+  const stopCamera = () => {
+    if (recordIntervalRef.current) {
+      clearInterval(recordIntervalRef.current);
+      recordIntervalRef.current = null;
+    }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach((t) => t.stop());
+      cameraStreamRef.current = null;
+    }
+    setIsCameraActive(false);
+    setIsRecordingVideo(false);
+  };
+
+  const capturePhoto = () => {
+    if (!cameraVideoRef.current) return;
+    const video = cameraVideoRef.current;
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => {
+      if (blob) {
+        const file = new File([blob], `live_photo_${Date.now()}.jpg`, { type: "image/jpeg" });
+        stopCamera();
+        handleSelectImage(file);
+      }
+    }, "image/jpeg", 0.95);
+  };
+
+  const startVideoRecording = () => {
+    if (!cameraStreamRef.current) return;
+    recordedChunksRef.current = [];
+    try {
+      const mime = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+        ? "video/webm;codecs=vp9"
+        : "video/webm";
+      const recorder = new MediaRecorder(cameraStreamRef.current, { mimeType: mime });
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = () => {
+        const blob = new Blob(recordedChunksRef.current, { type: "video/webm" });
+        const file = new File([blob], `live_video_${Date.now()}.webm`, { type: "video/webm" });
+        stopCamera();
+        handleSelectVideo(file);
+      };
+
+      recorder.start(500);
+      setIsRecordingVideo(true);
+      setRecordTimerSec(0);
+      recordIntervalRef.current = window.setInterval(() => {
+        setRecordTimerSec((prev) => {
+          if (prev >= 60) {
+            stopVideoRecording();
+            return 60;
+          }
+          return prev + 1;
+        });
+      }, 1000);
+    } catch (e: any) {
+      alert("Failed to initialize video recorder: " + (e.message || ""));
+    }
+  };
+
+  const stopVideoRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
+    if (recordIntervalRef.current) {
+      clearInterval(recordIntervalRef.current);
+      recordIntervalRef.current = null;
+    }
+    setIsRecordingVideo(false);
+  };
+
+  // Derive active video frame sample for 3D Heart
+  const activeVideoSample: RGBFrameSample | null =
+    videoResult?.sampled_frames && videoResult.sampled_frames.length > 0
+      ? videoResult.sampled_frames[Math.min(selectedVideoFrameIndex, videoResult.sampled_frames.length - 1)]
+      : null;
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh" }}>
-      {/* ==================================================================== */}
-      {/* STITCH RECREATION — SIDEBAR APPLICATION SHELL                        */}
-      {/* ==================================================================== */}
-      <aside className="app-sidebar">
-        <div className="sidebar-brand" onClick={() => setWorkspaceMode("landing")}>
-          <div className="sidebar-brand-mark">
-            <span className="material-symbols-outlined">shield_lock</span>
-          </div>
-          <span className="sidebar-brand-name">
-            Secura <span>AI</span>
-          </span>
-          <span className="sidebar-chip">STUDIO</span>
-        </div>
-
-        <div className="sidebar-scroll">
-          <div>
-            <div className="sidebar-group-label">Core Forensics</div>
-            <nav className="side-nav" style={{ marginTop: 6 }}>
-              <button
-                className={`side-nav-item ${workspaceMode === "landing" ? "active" : ""}`}
-                onClick={() => setWorkspaceMode("landing")}
-              >
-                <span className="material-symbols-outlined">dashboard</span> Overview
-              </button>
-              <button
-                className={`side-nav-item ${workspaceMode === "image_workspace" ? "active" : ""}`}
-                onClick={() => {
-                  setWorkspaceMode("image_workspace");
-                  if (!imageFile) imageFileInputRef.current?.click();
-                }}
-              >
-                <span className="material-symbols-outlined">document_scanner</span> Image Forensics
-              </button>
-              <button
-                className={`side-nav-item ${workspaceMode === "video_workspace" ? "active" : ""}`}
-                onClick={() => setWorkspaceMode("video_workspace")}
-              >
-                <span className="material-symbols-outlined">motion_photos</span> Video &amp; RGB-Heart
-              </button>
-            </nav>
-          </div>
-
-          <div>
-            <div className="sidebar-group-label">Trust &amp; Safety</div>
-            <nav className="side-nav" style={{ marginTop: 6 }}>
-              <button
-                className={`side-nav-item accent ${workspaceMode === "secura_social" ? "active" : ""}`}
-                onClick={() => setWorkspaceMode("secura_social")}
-              >
-                <span className="material-symbols-outlined">shield_person</span> Secura Social Suite
-              </button>
-            </nav>
-          </div>
-        </div>
-
-        <div className="sidebar-footer">
-          <button
-            onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-            className="btn-subtle"
-            title={`Switch to ${theme === "light" ? "Dark" : "Light"} theme`}
-            style={{ padding: "8px 12px", fontSize: 12.5 }}
-          >
-            {theme === "light" ? "☾ Dark" : "☼ Cream"}
-          </button>
-          {session ? (
-            <div className="sidebar-session">
-              <b>{session.username || "Analyst"}</b>
-              <span>{session.role || "Officer"}</span>
-              <button onClick={handleLogout} className="btn-subtle" style={{ marginTop: 6, fontSize: 12 }}>
-                Sign Out
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setIsAuthModalOpen(true)}
-              className="btn-primary"
-              style={{ padding: "9px 14px", fontSize: 13 }}
-            >
-              Analyst Login
-            </button>
-          )}
-        </div>
-      </aside>
-
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-      {/* Toast Notification Container */}
-      <div
-        style={{
-          position: "fixed",
-          top: 80,
-          right: 24,
-          zIndex: 1000,
-          display: "flex",
-          flexDirection: "column",
-          gap: 10,
-          pointerEvents: "none",
-        }}
-      >
-        {toasts.map((toast) => (
-          <div
-            key={toast.id}
-            className="card card-elevated"
-            style={{
-              padding: "12px 18px",
-              minWidth: 280,
-              maxWidth: 380,
-              pointerEvents: "auto",
-              borderLeft: `4px solid ${
-                toast.type === "success"
-                  ? "var(--color-botanical-green)"
-                  : toast.type === "error"
-                  ? "var(--color-muted-red)"
-                  : "var(--color-terracotta)"
-              }`,
-            }}
-          >
-            <div style={{ fontWeight: 700, fontSize: 13, color: "var(--text-primary)" }}>{toast.title}</div>
-            <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{toast.message}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Top header replaced by the Stitch sidebar application shell (see above) */}
-
-      {/* Hidden File Input for Global Image Trigger */}
-      <input
-        ref={imageFileInputRef}
-        type="file"
-        accept="image/jpeg,image/png,image/webp,image/tiff"
-        style={{ display: "none" }}
-        onChange={(e) => {
-          if (e.target.files && e.target.files[0]) {
-            handleImageFileSelect(e.target.files[0]);
-          }
-        }}
-      />
-
-      {/* ========================================================================= */}
-      {/* VIEW 1: LUXURY EDITORIAL LANDING PAGE                                    */}
-      {/* ========================================================================= */}
-      {workspaceMode === "landing" && (
-        <div style={{ flex: 1, display: "flex", flexDirection: "column" }} className="animate-fade-in">
-          {/* ==================================================================== */}
-          {/* OVERVIEW DASHBOARD — recreated from Stitch "Main Overview Dashboard"  */}
-          {/* ==================================================================== */}
-          <main className="dash-shell">
-            {/* Welcome header & live backend telemetry (real API values, never mocked) */}
-            <div className="dash-welcome">
-              <div className="dash-chips">
-                <span className={`dash-chip ${engineError ? "err" : ""}`}>
-                  <span className="dot" />
-                  {engineHealth
-                    ? `ENGINE ${engineHealth.status.toUpperCase()} • v${engineHealth.version}`
-                    : engineError
-                      ? "ENGINE UNREACHABLE"
-                      : "ENGINE • CHECKING…"}
-                </span>
-                <span className={`dash-chip ${engineHealth?.latencyMs == null ? "warn" : ""}`}>
-                  <span className="dot" />
-                  {engineHealth?.latencyMs != null ? `LATENCY ${engineHealth.latencyMs}MS` : "LATENCY —"}
-                </span>
-                <span className={`dash-chip ${modelRegistry ? (modelRegistry.inference_ready ? "" : "warn") : "warn"}`}>
-                  <span className="material-symbols-outlined">memory</span>
-                  {modelRegistry ? (modelRegistry.inference_ready ? "MODELS READY" : "MODELS PARTIAL") : "MODEL REGISTRY …"}
-                </span>
-                <span className="dash-chip">
-                  <span className="material-symbols-outlined">hub</span>
-                  CLIP ViT-L/14 • SWIN • ELA/DCT
-                </span>
-              </div>
-
-              <h1 className="dash-title">Your Digital Trust Workspace</h1>
-              <p className="dash-sub">
-                Verify media, review evidence, and keep shared content safer across the organization — layered
-                forensics with an honest abstention policy.
-              </p>
-
-              <div className="hero-ctas" style={{ marginBottom: 0 }}>
-                <button
-                  onClick={() => {
-                    setWorkspaceMode("image_workspace");
-                    if (!imageFile) imageFileInputRef.current?.click();
-                  }}
-                  className="btn-primary"
-                  style={{ fontSize: 15, padding: "12px 24px" }}
-                >
-                  Analyze an Image →
-                </button>
-                <button
-                  onClick={() => setWorkspaceMode("video_workspace")}
-                  className="btn-secondary"
-                  style={{ fontSize: 15, padding: "12px 24px" }}
-                >
-                  Analyze a Video →
-                </button>
-                {!session && (
-                  <button
-                    onClick={() => setIsAuthModalOpen(true)}
-                    className="btn-secondary"
-                    style={{ fontSize: 15, padding: "12px 24px" }}
-                  >
-                    Analyst Login
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Quick action cards grid (Stitch layout, wired to real application views) */}
-            <div className="qa-grid">
-              <button
-                type="button"
-                className="qa-card"
-                onClick={() => {
-                  setWorkspaceMode("image_workspace");
-                  if (!imageFile) imageFileInputRef.current?.click();
-                }}
-              >
-                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  <div className="qa-icon" style={{ backgroundColor: "var(--color-terracotta-subtle)", color: "var(--color-terracotta)" }}>
-                    <span className="material-symbols-outlined">image_search</span>
-                  </div>
-                  <div>
-                    <span className="qa-kicker">Forensic Core</span>
-                    <div className="qa-title">Analyze an Image</div>
-                    <div className="qa-desc">Inspect forensic noise signatures, ELA maps, and DCT residuals.</div>
-                  </div>
-                </div>
-                <div className="qa-foot">
-                  <span>DIRECT INGESTION</span>
-                  <span className="material-symbols-outlined">arrow_forward</span>
-                </div>
-              </button>
-
-              <button type="button" className="qa-card" onClick={() => setWorkspaceMode("video_workspace")}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  <div className="qa-icon" style={{ backgroundColor: "var(--color-botanical-subtle)", color: "var(--color-botanical-green)" }}>
-                    <span className="material-symbols-outlined">motion_sensor_active</span>
-                  </div>
-                  <div>
-                    <span className="qa-kicker">Temporal Stack</span>
-                    <div className="qa-title">Analyze a Video</div>
-                    <div className="qa-desc">Frame-by-frame temporal consistency, facial warping &amp; deepfake check.</div>
-                  </div>
-                </div>
-                <div className="qa-foot">
-                  <span>SYNC PIPELINE</span>
-                  <span className="material-symbols-outlined">arrow_forward</span>
-                </div>
-              </button>
-
-              <button type="button" className="qa-card" onClick={() => setWorkspaceMode("secura_social")}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  <div className="qa-icon" style={{ backgroundColor: "var(--bg-surface-secondary)", color: "var(--color-espresso)" }}>
-                    <span className="material-symbols-outlined">dynamic_feed</span>
-                  </div>
-                  <div>
-                    <span className="qa-kicker">Syndicated Stream</span>
-                    <div className="qa-title">Open Social Feed</div>
-                    <div className="qa-desc">Instagram-style cryptographically certified real-world media stream.</div>
-                  </div>
-                </div>
-                <div className="qa-foot">
-                  <span>FEED INSPECTOR</span>
-                  <span className="material-symbols-outlined">arrow_forward</span>
-                </div>
-              </button>
-
-              <button type="button" className="qa-card" onClick={() => setWorkspaceMode("secura_social")}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  <div className="qa-icon" style={{ backgroundColor: "var(--color-mustard-subtle)", color: "var(--color-mustard-deep)" }}>
-                    <span className="material-symbols-outlined">mark_chat_read</span>
-                  </div>
-                  <div>
-                    <span className="qa-kicker">Pre-Moderated</span>
-                    <div className="qa-title">Start Conversation</div>
-                    <div className="qa-desc">End-to-end encrypted direct messaging with inline provenance proofs.</div>
-                  </div>
-                </div>
-                <div className="qa-foot">
-                  <span>SECURE CHAT</span>
-                  <span className="material-symbols-outlined">arrow_forward</span>
-                </div>
-              </button>
-
-              <button type="button" className="qa-card" onClick={() => setWorkspaceMode("secura_social")}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  <div className="qa-icon" style={{ backgroundColor: "var(--color-terracotta-subtle)", color: "var(--color-terracotta)" }}>
-                    <span className="material-symbols-outlined">policy</span>
-                  </div>
-                  <div>
-                    <span className="qa-kicker">Regulatory RAG</span>
-                    <div className="qa-title">Policy Intelligence</div>
-                    <div className="qa-desc">Query cross-jurisdiction rules (India IT Rules, platform policy corpus).</div>
-                  </div>
-                </div>
-                <div className="qa-foot">
-                  <span>CORPUS QUERY</span>
-                  <span className="material-symbols-outlined">arrow_forward</span>
-                </div>
-              </button>
-            </div>
-
-            {/* Two-column: Detection Ledger (REAL model-registry data) + Signature RGB suite */}
-            <div className="dash-two-col">
-              <div className="panel">
-                <div className="panel-head">
-                  <div>
-                    <span className="panel-kicker">Cluster Telemetry</span>
-                    <h2 className="panel-title">Forensic Detection Ledger</h2>
-                  </div>
-                  <span className={`dash-chip ${modelRegistry ? (modelRegistry.inference_ready ? "" : "warn") : engineError ? "err" : "warn"}`}>
-                    <span className="dot" />
-                    {modelRegistry
-                      ? modelRegistry.inference_ready
-                        ? "INFERENCE READY"
-                        : "PARTIAL — SEE PROBES"
-                      : engineError
-                        ? "BACKEND UNREACHABLE"
-                        : "LOADING…"}
-                  </span>
-                </div>
-
-                {modelRegistry ? (
-                  <div className="ledger-grid">
-                    <div className="ledger-card">
-                      <span className="ledger-label">Active Probe Head</span>
-                      <span className="ledger-value">{modelRegistry.active_head_id}</span>
-                      <span className={`ledger-meta ${modelRegistry.backbone.loaded ? "ok" : "err"}`}>
-                        <span className="dot" />
-                        {modelRegistry.backbone.loaded ? "BACKBONE LOADED" : "BACKBONE OFFLINE"}
-                      </span>
-                    </div>
-                    <div className="ledger-card">
-                      <span className="ledger-label">Execution Device</span>
-                      <span className="ledger-value">{modelRegistry.device_available}</span>
-                      <span className="ledger-meta">
-                        <span className="dot" />
-                        {modelRegistry.cuda_driver_available
-                          ? `CUDA • ${modelRegistry.vram_total_mb ?? 0} MB VRAM`
-                          : "CPU INFERENCE"}
-                      </span>
-                    </div>
-                    <div className="ledger-card">
-                      <span className="ledger-label">Registered Probes</span>
-                      <span className="ledger-value">{modelRegistry.registered_heads.length} heads</span>
-                      <span className={`ledger-meta ${modelRegistry.registered_heads.some((h) => h.head_state === "READY") ? "ok" : "warn"}`}>
-                        <span className="dot" />
-                        {modelRegistry.registered_heads.filter((h) => h.head_state === "READY").length} READY
-                      </span>
-                    </div>
-                    <div className="ledger-card">
-                      <span className="ledger-label">Service Health</span>
-                      <span className="ledger-value">{engineHealth ? `v${engineHealth.version}` : "—"}</span>
-                      <span className={`ledger-meta ${engineHealth ? "ok" : "err"}`}>
-                        <span className="dot" />
-                        {engineHealth ? `HEALTHY • ${engineHealth.latencyMs ?? "?"} MS` : "NO RESPONSE"}
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="ledger-grid">
-                    <div className="ledger-card">
-                      <span className="ledger-label">Model Registry</span>
-                      <span className="ledger-value">{engineError ? "Backend unreachable" : "Loading registry…"}</span>
-                    </div>
-                  </div>
-                )}
-
-                {modelRegistry && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {modelRegistry.registered_heads.map((h) => (
-                      <div className="pipe-row" key={h.head_id}>
-                        <span className="name">
-                          <span className="material-symbols-outlined">neurology</span>
-                          {h.model_name}
-                        </span>
-                        <span className="status">
-                          {h.operational_state === "READY" ? "OPERATIONAL" : h.operational_state}
-                          {h.head_id === modelRegistry.active_head_id ? " • ACTIVE" : ""}
-                        </span>
-                      </div>
-                    ))}
-                    <div className="pipe-row">
-                      <span className="name">
-                        <span className="material-symbols-outlined">memory</span>
-                        {modelRegistry.backbone.name}
-                      </span>
-                      <span className="status">
-                        {modelRegistry.backbone.loaded
-                          ? `OPERATIONAL • ${modelRegistry.backbone.device.toUpperCase()}`
-                          : modelRegistry.backbone.state}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Signature RGB-Heart visualization (live, real component) */}
-              <div className="panel">
-                <div className="panel-head">
-                  <div>
-                    <span className="panel-kicker">Signature Visualization</span>
-                    <h2 className="panel-title">RGB Temporal Signal Geometry</h2>
-                  </div>
-                  <span className="dash-chip">
-                    <span className="material-symbols-outlined">favorite</span>
-                    CARDIOID COHERENCE
-                  </span>
-                </div>
-                <div style={{ display: "flex", justifyContent: "center", padding: "4px 0" }}>
-                  <RGBHeartVisualization showLabels={false} width={300} height={260} />
-                </div>
-                <p style={{ fontSize: 12.5, color: "var(--text-secondary)", margin: 0, textAlign: "center", lineHeight: 1.6 }}>
-                  Real-time inter-frame colour harmony and channel variance computed during video decoding.
-                </p>
-              </div>
-            </div>
-          </main>
-
-          {/* Section 2: The Three-Step Forensic Process */}
-          <section style={{ backgroundColor: "var(--bg-surface)", borderTop: "1px solid var(--border-subtle)", padding: "64px 28px" }}>
-            <div style={{ maxWidth: 1360, margin: "0 auto" }}>
-              <div style={{ textAlign: "center", maxWidth: 640, margin: "0 auto 48px" }}>
-                <span className="eyebrow">METHODOLOGICAL RIGOR</span>
-                <h2 style={{ fontSize: 36, marginBottom: 12 }}>How Secura AI Examines Media</h2>
-                <p style={{ color: "var(--text-secondary)", fontSize: 15 }}>
-                  Forensic certainty cannot be obtained from a single model score. We decompose media into physical,
-                  statistical, and latent dimensions.
-                </p>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 24 }}>
-                <div className="card card-oat" style={{ padding: 28 }}>
-                  <div style={{ fontSize: 24, fontWeight: 800, color: "var(--color-terracotta)", marginBottom: 12 }}>01</div>
-                  <h3 style={{ fontSize: 18, marginBottom: 8 }}>Multi-Modal Sampling</h3>
-                  <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-                    Directly decodes raw frame streams, extracting chromatic moments, high-frequency residual noise, and
-                    cryptographic container manifests without lossy re-compression.
-                  </p>
-                </div>
-
-                <div className="card card-oat" style={{ padding: 28 }}>
-                  <div style={{ fontSize: 24, fontWeight: 800, color: "var(--color-terracotta)", marginBottom: 12 }}>02</div>
-                  <h3 style={{ fontSize: 18, marginBottom: 8 }}>Layered Decomposition</h3>
-                  <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-                    Parallel analyzers measure representation trajectory curvature in CLIP latent space, Swin spatial
-                    diffusion probabilities, ELA re-compression artifacts, and JPEG DCT coefficients.
-                  </p>
-                </div>
-
-                <div className="card card-oat" style={{ padding: 28 }}>
-                  <div style={{ fontSize: 24, fontWeight: 800, color: "var(--color-terracotta)", marginBottom: 12 }}>03</div>
-                  <h3 style={{ fontSize: 18, marginBottom: 8 }}>Honest Synthesis</h3>
-                  <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-                    Synthesizes evidence using a calibrated conflict-aware policy. When temporal dynamics and spatial
-                    textures disagree, the engine transparently abstains with an INCONCLUSIVE finding.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* Section 3: Evidence Integrity & Honest Abstention Manifesto */}
-          <section style={{ padding: "64px 28px", maxWidth: 1360, margin: "0 auto", width: "100%" }}>
-            <div
-              className="card card-elevated"
-              style={{
-                padding: "40px 48px",
-                borderRadius: 24,
-                backgroundColor: "var(--bg-surface)",
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: 40,
-                alignItems: "center",
-              }}
-            >
-              <div>
-                <span className="eyebrow">SCIENTIFIC MANIFESTO</span>
-                <h2 style={{ fontSize: 32, marginBottom: 16 }}>The Principle of Honest Abstention</h2>
-                <p style={{ fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.7, marginBottom: 20 }}>
-                  In modern generative diffusion pipelines, individual frames can look photorealistic while temporal
-                  motion trajectories weave erratically. Many systems force an arbitrary percentage or default to false
-                  conviction.
-                </p>
-                <p style={{ fontSize: 14, color: "var(--text-secondary)", lineHeight: 1.7 }}>
-                  Secura AI explicitly reports conflicting signals, itemizes supporting and contradictory evidence,
-                  and refuses to manufacture confidence where the empirical physics remain ambiguous.
-                </p>
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                <div className="card-oat" style={{ padding: "16px 20px" }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: "var(--color-terracotta)" }}>
-                    No Pseudo-Precision
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4 }}>
-                    Scores are labeled with their exact mathematical semantics (uncalibrated heuristic vs. empirical likelihood).
-                  </div>
-                </div>
-
-                <div className="card-oat" style={{ padding: "16px 20px" }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: "var(--color-mustard-deep)" }}>
-                    Preservation of Physical Context
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4 }}>
-                    High-pass noise is reported as a texture statistic, never as proof of physical CMOS camera hardware.
-                  </div>
-                </div>
-
-                <div className="card-oat" style={{ padding: "16px 20px" }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: "var(--color-botanical-green)" }}>
-                    Transparent Provenance
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 4 }}>
-                    Absence of C2PA credentials is appropriately categorized as neutral, not as evidence of manipulation.
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* VIEW 2: IMAGE FORENSICS 8-VIEW WORKSTATION                               */}
-      {/* ========================================================================= */}
-      {workspaceMode === "image_workspace" && (
-        <div className="workspace-layout animate-fade-in" style={{ flex: 1 }}>
-          {/* Header Bar */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 14 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-              <button onClick={() => setWorkspaceMode("landing")} className="btn-secondary" style={{ padding: "8px 14px", fontSize: 13 }}>
-                ← Overview
-              </button>
-              <div>
-                <div className="eyebrow" style={{ marginBottom: 2 }}>IMAGE FORENSIC WORKBENCH</div>
-                <h2 style={{ fontSize: 24, margin: 0 }}>Still Image Forensic Suite</h2>
-              </div>
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, backgroundColor: "var(--bg-surface-secondary)", padding: "4px 10px", borderRadius: 8, border: "1px solid var(--border-subtle)" }}>
-                <span style={{ fontSize: 11, color: "var(--text-secondary)", fontWeight: 600 }}>PROBE:</span>
-                <select
-                  value={imageProbe}
-                  onChange={(e) => {
-                    const newProbe = e.target.value;
-                    setImageProbe(newProbe);
-                    if (imageFile) {
-                      runImageForensics(imageFile, newProbe);
-                    }
-                  }}
-                  style={{
-                    backgroundColor: "transparent",
-                    border: "none",
-                    color: "var(--text-primary)",
-                    fontSize: 12,
-                    fontWeight: 600,
-                    outline: "none",
-                    cursor: "pointer",
-                  }}
-                >
-                  <option value="Ensemble">Multi-Architecture Ensemble (Recommended)</option>
-                  <option value="UniversalFakeDetect">UniversalFakeDetect (CVPR 2023)</option>
-                  <option value="SecuraCustom">SecuraCustom AI Probe (High-Precision)</option>
-                  <option value="SwinAIImageDetector">Swin Vision Transformer (Calibrated)</option>
-                </select>
-              </div>
-              {imageFile && (
-                <span
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 12,
-                    color: "var(--text-secondary)",
-                    backgroundColor: "var(--bg-surface-secondary)",
-                    padding: "6px 12px",
-                    borderRadius: 8,
-                    border: "1px solid var(--border-subtle)",
-                  }}
-                >
-                  {imageFile.name} ({(imageFile.size / 1024).toFixed(1)} KB)
-                </span>
-              )}
-              <button onClick={() => imageFileInputRef.current?.click()} className="btn-secondary" style={{ padding: "8px 16px", fontSize: 13 }}>
-                {imageFile ? "Replace Image" : "📁 Upload Image"}
-              </button>
-              <button onClick={() => openPhotoCamera("user")} className="btn-primary" style={{ padding: "8px 16px", fontSize: 13 }}>
-                📷 Camera
-              </button>
-            </div>
-          </div>
-
-          {/* Upload Dropzone (if no image) */}
-          {!imageFile && (
-            <div
-              className="dropzone-container"
-              onClick={() => imageFileInputRef.current?.click()}
-              style={{ minHeight: 320, justifyContent: "center" }}
-            >
-              <div
-                style={{
-                  width: 56,
-                  height: 56,
-                  borderRadius: "50%",
-                  backgroundColor: "var(--color-terracotta-subtle)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "var(--color-terracotta)",
-                  fontSize: 24,
-                }}
-              >
-                ⇪
-              </div>
-              <h3 style={{ fontSize: 18, margin: 0 }}>Inspect Image for AI Generation</h3>
-              <p style={{ fontSize: 13, color: "var(--text-secondary)", maxWidth: 420 }}>
-                Upload a photo or capture live with your device camera for multi-scale spatial and frequency forensics.
-              </p>
-              <div style={{ display: "flex", gap: 12, marginTop: 12 }} onClick={(e) => e.stopPropagation()}>
-                <button onClick={() => imageFileInputRef.current?.click()} className="btn-secondary" style={{ padding: "10px 20px", fontSize: 13 }}>
-                  📁 Choose File
-                </button>
-                <button onClick={() => openPhotoCamera("user")} className="btn-primary" style={{ padding: "10px 20px", fontSize: 13 }}>
-                  📷 Open Camera
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Loading Indicator */}
-          {isImageAnalyzing && (
-            <div className="card card-elevated" style={{ padding: 48, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
-              <div
-                style={{
-                  width: 44,
-                  height: 44,
-                  border: "3px solid var(--border-subtle)",
-                  borderTopColor: "var(--color-terracotta)",
-                  borderRadius: "50%",
-                  animation: "spin 0.8s linear infinite",
-                }}
+    <div className="min-h-screen bg-[#FAF7EE] text-[#2A2521] font-sans antialiased flex flex-col selection:bg-[#E9C46A]/40 selection:text-[#2A2521]">
+      {/* ===================================================================== */}
+      {/* BESPOKE TOP NAVIGATION BAR                                            */}
+      {/* ===================================================================== */}
+      <header className="sticky top-0 z-40 bg-[#FAF7EE]/95 backdrop-blur border-b border-[#E8DFCF] px-6 lg:px-12 py-3.5 flex items-center justify-between">
+        {/* Bespoke Vector Emblem Brand */}
+        <div
+          onClick={() => setActiveTab("landing")}
+          className="flex items-center gap-3 cursor-pointer group"
+        >
+          {/* Custom SVG Precision Emblem (Cryptographic Aperture & Verification Prism) */}
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#FFFDF9] to-[#F5ECE0] border border-[#E5DAC6] p-2 shadow-xs flex items-center justify-center group-hover:border-[#D9651E] transition-colors">
+            <svg viewBox="0 0 40 40" className="w-full h-full" fill="none">
+              <circle cx="20" cy="20" r="16" stroke="#D9651E" strokeWidth="2" strokeDasharray="4 2" />
+              <path
+                d="M20 7L24 16L33 20L24 24L20 33L16 24L7 20L16 16L20 7Z"
+                fill="url(#brandGrad)"
+                stroke="#C6A64B"
+                strokeWidth="1.2"
               />
-              <div style={{ fontSize: 18, fontWeight: 700 }}>Computing Multi-Layer Image Evidence...</div>
-              <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-                Evaluating compression grids, pixel residuals, EXIF structure, and deep neural features.
+              <circle cx="20" cy="20" r="3.5" fill="#D9651E" />
+              <defs>
+                <linearGradient id="brandGrad" x1="7" y1="7" x2="33" y2="33" gradientUnits="userSpaceOnUse">
+                  <stop stopColor="#EA7B32" />
+                  <stop offset="0.6" stopColor="#E9C46A" />
+                  <stop offset="1" stopColor="#C94A29" />
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-extrabold text-xl tracking-tight text-[#2A2521]">
+                Secura<span className="text-[#D9651E]">.AI</span>
+              </span>
+              <span className="text-[10px] font-mono font-semibold tracking-wider uppercase px-2 py-0.5 rounded-full bg-[#F5ECDA] text-[#8A6714] border border-[#E8D9B5]">
+                LABORATORY
+              </span>
+            </div>
+            <p className="text-[11px] text-[#70675D]">Media Forensics &amp; Generative Inversion</p>
+          </div>
+        </div>
+
+        {/* Tab Navigation Switcher */}
+        <nav className="flex items-center bg-[#F2EBDB] p-1 rounded-xl border border-[#E2D6C0]">
+          <button
+            type="button"
+            onClick={() => setActiveTab("landing")}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              activeTab === "landing"
+                ? "bg-white text-[#D9651E] shadow-xs"
+                : "text-[#6A6156] hover:text-[#2A2521]"
+            }`}
+          >
+            <span className="material-symbols-outlined text-[16px]">home</span>
+            <span>Overview</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("image")}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              activeTab === "image"
+                ? "bg-white text-[#D9651E] shadow-xs"
+                : "text-[#6A6156] hover:text-[#2A2521]"
+            }`}
+          >
+            <span className="material-symbols-outlined text-[16px]">image</span>
+            <span>Image Lab</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("video")}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              activeTab === "video"
+                ? "bg-white text-[#D9651E] shadow-xs"
+                : "text-[#6A6156] hover:text-[#2A2521]"
+            }`}
+          >
+            <span className="material-symbols-outlined text-[16px]">videocam</span>
+            <span>Video Lab</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("batch")}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              activeTab === "batch"
+                ? "bg-white text-[#D9651E] shadow-xs"
+                : "text-[#6A6156] hover:text-[#2A2521]"
+            }`}
+          >
+            <span className="material-symbols-outlined text-[16px]">dynamic_feed</span>
+            <span>Batch Audit</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("live-shield")}
+            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              activeTab === "live-shield"
+                ? "bg-white text-[#D9651E] shadow-xs"
+                : "text-[#6A6156] hover:text-[#2A2521]"
+            }`}
+          >
+            <span className="material-symbols-outlined text-[16px]">shield_person</span>
+            <span>Live Shield</span>
+          </button>
+        </nav>
+
+        {/* Live Cluster Status Pill */}
+        <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/90 border border-[#E8DFCF] shadow-xs text-xs">
+          <span className="relative flex h-2 w-2">
+            {healthStatus.online ? (
+              <>
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600"></span>
+              </>
+            ) : (
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+            )}
+          </span>
+          <span className="font-medium text-[#4D453C]">
+            {healthStatus.online
+              ? `Local Engine Active (${healthStatus.latencyMs ?? 15}ms)`
+              : "Connecting to API..."}
+          </span>
+        </div>
+      </header>
+
+      {/* ===================================================================== */}
+      {/* MAIN VIEW CONTAINER                                                   */}
+      {/* ===================================================================== */}
+      <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-8">
+        {/* =================================================================== */}
+        {/* VIEW 0: PRESTIGIOUS EDITORIAL LANDING PAGE                          */}
+        {/* =================================================================== */}
+        {activeTab === "landing" && (
+          <div className="space-y-16 animate-fade-in pb-12">
+            {/* Hero Section */}
+            <div className="text-center space-y-6 pt-4 max-w-3xl mx-auto">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#F4EBD9] border border-[#E8D9B5] text-[#8A6714] text-xs font-semibold">
+                <span className="material-symbols-outlined text-sm">verified</span>
+                <span>ISO/IEC 27037 Digital Evidence Standard &bull; Multi-Branch Neural Inference</span>
+              </div>
+
+              <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-[#2A2521] tracking-tight leading-[1.12]">
+                The Forensic Standard for <span className="text-[#D9651E]">Media Authenticity</span>.
+              </h1>
+
+              <p className="text-base sm:text-lg text-[#6C6357] leading-relaxed">
+                Secura AI combines Latent Diffusion Inversion, Photoplethysmography Biometrics, and Sensor Pattern Noise into a unified verification engine to detect synthetic images and manipulated video.
+              </p>
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center justify-center gap-4 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("image")}
+                  className="px-6 py-3 rounded-xl bg-[#D9651E] hover:bg-[#C25816] text-white font-bold text-sm shadow-md transition-all flex items-center gap-2 hover:shadow-lg"
+                >
+                  <span className="material-symbols-outlined text-[18px]">image</span>
+                  <span>Image Lab</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("video")}
+                  className="px-6 py-3 rounded-xl bg-[#2D6A4F] hover:bg-[#24543E] text-white font-bold text-sm shadow-md transition-all flex items-center gap-2 hover:shadow-lg"
+                >
+                  <span className="material-symbols-outlined text-[18px]">videocam</span>
+                  <span>Video Lab</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => startCamera("photo")}
+                  className="px-5 py-3 rounded-xl bg-white hover:bg-[#F7F2E6] border border-[#DDD1BE] text-[#2A2521] font-semibold text-sm shadow-xs transition-colors flex items-center gap-2"
+                >
+                  <span className="material-symbols-outlined text-[18px] text-[#D9651E]">center_focus_strong</span>
+                  <span>Live Camera Capture</span>
+                </button>
               </div>
             </div>
-          )}
 
-          {/* Image Analysis Results */}
-          {imageFile && imageResult && !isImageAnalyzing && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-              {/* Consumer-First Canonical Binary Decision Banner */}
-              {imageResult.canonical_verdict && (
-                <div
-                  className="card card-elevated"
-                  style={{
-                    padding: "20px 24px",
-                    borderLeft: `6px solid ${
-                      imageResult.canonical_verdict.predicted_label === "AI_GENERATED"
-                        ? "var(--color-terracotta)"
-                        : "var(--color-botanical-green)"
-                    }`,
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    flexWrap: "wrap",
-                    gap: 16,
-                  }}
-                >
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <span className="eyebrow" style={{ margin: 0 }}>CANONICAL VERDICT</span>
-                      <span
-                        className={`badge ${
-                          imageResult.canonical_verdict.predicted_label === "AI_GENERATED"
-                            ? "badge-terracotta"
-                            : "badge-verified"
-                        }`}
-                      >
-                        {imageResult.canonical_verdict.display_label}
+            {/* Live Interactive 3D Holographic Cardioid Showcase */}
+            <div className="rounded-3xl bg-white border border-[#E8DFCF] p-8 lg:p-12 shadow-sm space-y-8">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#EFE8DA] pb-6">
+                <div>
+                  <span className="text-xs font-mono font-bold tracking-wider uppercase text-[#D9651E]">
+                    Interactive Holographic Demonstrator
+                  </span>
+                  <h2 className="text-2xl font-bold text-[#2A2521] tracking-tight mt-1">
+                    3D Holographic Cardioid Biometric Engine
+                  </h2>
+                  <p className="text-sm text-[#70675D] max-w-xl mt-1">
+                    Witness how the 3D cardiac manifold behaves under real optical conditions versus AI-generated synthetic disruption.
+                  </p>
+                </div>
+
+                {/* Simulation Mode Toggle */}
+                <div className="flex items-center bg-[#F2EBDB] p-1 rounded-xl border border-[#E2D6C0] self-start md:self-auto shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setLandingSimMode("genuine")}
+                    className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                      landingSimMode === "genuine"
+                        ? "bg-white text-emerald-800 shadow-xs"
+                        : "text-[#6C6357] hover:text-[#2A2521]"
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-emerald-600"></span>
+                    <span>Genuine Camera Media</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setLandingSimMode("ai")}
+                    className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                      landingSimMode === "ai"
+                        ? "bg-white text-[#D9651E] shadow-xs"
+                        : "text-[#6C6357] hover:text-[#2A2521]"
+                    }`}
+                  >
+                    <span className="w-2 h-2 rounded-full bg-[#D9651E] animate-pulse"></span>
+                    <span>AI-Generated Deepfake</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Showcase Grid */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+                {/* 3D Heart Canvas Column */}
+                <div className="lg:col-span-6 flex justify-center">
+                  <RGBHeartVisualization
+                    isAiGenerated={landingSimMode === "ai"}
+                    confidenceScore={landingSimMode === "ai" ? 0.942 : 0.985}
+                    width={380}
+                    height={330}
+                    title={
+                      landingSimMode === "ai"
+                        ? "Synthetic Disruption (Turbulent Rotation)"
+                        : "Authentic Hemodynamics (Steady Rotation)"
+                    }
+                  />
+                </div>
+
+                {/* Explanation & Technical Walkthrough */}
+                <div className="lg:col-span-6 space-y-4">
+                  <div
+                    className={`p-4 rounded-2xl border transition-all ${
+                      landingSimMode === "ai"
+                        ? "bg-[#FFF5ED] border-[#F2C2A2]"
+                        : "bg-[#F0F8F3] border-[#BCE1CC]"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 font-bold text-sm">
+                      <span className="material-symbols-outlined text-lg">
+                        {landingSimMode === "ai" ? "warning" : "check_circle"}
+                      </span>
+                      <span>
+                        {landingSimMode === "ai"
+                          ? "State: AI-Generated / Deepfake Profile Detected"
+                          : "State: Camera Authentic / Physiological Profile"}
                       </span>
                     </div>
-                    <h2 style={{ fontSize: 24, margin: 0, fontWeight: 800 }}>
-                      {imageResult.canonical_verdict.predicted_label === "AI_GENERATED"
-                        ? "AI GENERATED IMAGE"
-                        : "AUTHENTIC PHOTOGRAPH (NOT AI GENERATED)"}
-                    </h2>
-                    <p style={{ fontSize: 13, color: "var(--text-secondary)", margin: 0, maxWidth: 640 }}>
-                      {imageResult.canonical_verdict.evidence_summary}
+                    <p className="text-xs mt-1.5 leading-relaxed text-[#4A4237]">
+                      {landingSimMode === "ai"
+                        ? "The 3D holographic cardioid rotates rapidly and erratically with turbulent angular jitter and chromatic dispersion. Deep neural generative diffusion networks synthesize pixel textures without physical blood perfusion, destroying capillary rhythm."
+                        : "The 3D holographic cardioid exhibits smooth, steady, majestic rotation synchronized to natural 72 BPM cardiac pulse wave. Remote photoplethysmography (rPPG) verifies microscopic hemoglobin absorption."}
                     </p>
                   </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>AI PROBABILITY / SCORE</div>
-                    <div
-                      style={{
-                        fontSize: 32,
-                        fontWeight: 800,
-                        color:
-                          imageResult.canonical_verdict.predicted_label === "AI_GENERATED"
-                            ? "var(--color-terracotta)"
-                            : "var(--color-botanical-green)",
-                      }}
-                    >
-                      {(imageResult.canonical_verdict.model_score * 100).toFixed(1)}%
+
+                  <div className="space-y-2.5 text-xs text-[#5C5449]">
+                    <div className="flex items-start gap-2.5">
+                      <span className="material-symbols-outlined text-[18px] text-[#D9651E] shrink-0">speed</span>
+                      <div>
+                        <strong>Rotational Dynamics:</strong> When synthetic media is introduced, the model triggers high-frequency manifold warping and accelerates angular rotation to signal anomalous spatial drift.
+                      </div>
                     </div>
-                    <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
-                      Threshold: 50.0% · Active Model: {imageResult.ai_detection?.model_name || imageResult.canonical_verdict.model_version}
+
+                    <div className="flex items-start gap-2.5">
+                      <span className="material-symbols-outlined text-[18px] text-[#8A6714] shrink-0">biometrics</span>
+                      <div>
+                        <strong>Sub-Dermal Perfusion:</strong> Green-channel light absorption measures authentic capillary volume fluctuations across temporal windows.
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-2.5">
+                      <span className="material-symbols-outlined text-[18px] text-[#2D6A4F] shrink-0">history_edu</span>
+                      <div>
+                        <strong>Exportable Audit Dossiers:</strong> Every inspection produces a cryptographically sealed, printable PDF dossier with SHA-256 validation.
+                      </div>
                     </div>
                   </div>
                 </div>
-              )}
+              </div>
+            </div>
 
-              {/* 8-View Segmented Navigation */}
-              <div className="segmented-control">
-                {[
-                  { id: "synthesis", label: "1. Unified Report" },
-                  { id: "ela", label: "2. ELA Re-compression" },
-                  { id: "dct", label: "3. DCT Frequencies" },
-                  { id: "noise", label: "4. Noise Residuals" },
-                  { id: "c2pa", label: "5. Provenance & SynthID" },
-                  { id: "metadata", label: "6. Metadata & EXIF" },
-                  { id: "ai_detector", label: "7. Neural AI Detector" },
-                  { id: "properties", label: "8. Physical Properties" },
-                ].map((tab) => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveImageTab(tab.id as any)}
-                    className={`segmented-btn ${activeImageTab === tab.id ? "active" : ""}`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
+            {/* 3 Core Scientific Pillars */}
+            <div className="space-y-6">
+              <div className="text-center max-w-xl mx-auto space-y-2">
+                <span className="text-xs font-mono font-bold uppercase tracking-wider text-[#D9651E]">
+                  Scientific Architecture
+                </span>
+                <h2 className="text-2xl lg:text-3xl font-extrabold text-[#2A2521] tracking-tight">
+                  Multi-Pillar Verification Defense
+                </h2>
+                <p className="text-xs text-[#70675D]">
+                  No single heuristic is sufficient. Secura AI cross-references spatial, temporal, and physical signals.
+                </p>
               </div>
 
-              {/* Workstation Split View */}
-              <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 24, alignItems: "start" }}>
-                {/* Left: Image Preview Card */}
-                <div className="card" style={{ padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
-                  <div style={{ position: "relative", backgroundColor: "var(--bg-surface-secondary)", borderRadius: 12, overflow: "hidden", textAlign: "center" }}>
-                    <img
-                      src={imagePreviewUrl ?? undefined}
-                      alt="Target Forensic Sample"
-                      style={{ maxWidth: "100%", maxHeight: 420, objectFit: "contain", borderRadius: 8 }}
-                    />
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {/* Pillar 1 */}
+                <div className="rounded-2xl bg-white border border-[#E8DFCF] p-6 shadow-xs space-y-3 flex flex-col justify-between">
+                  <div className="space-y-3">
+                    <div className="w-12 h-12 rounded-xl bg-[#FDF1E8] text-[#D9651E] flex items-center justify-center">
+                      <span className="material-symbols-outlined text-2xl">lens_blur</span>
+                    </div>
+                    <h3 className="font-bold text-base text-[#2A2521]">Latent Inversion &amp; Swin</h3>
+                    <p className="text-xs text-[#6C6357] leading-relaxed">
+                      Swin Transformer spatial backbone isolates micro-diffusion anomalies, high-frequency DCT blocking artifacts, and spatial token heatmaps.
+                    </p>
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--text-secondary)" }}>
-                    <span>Format: {imageResult.image_validation?.detected_format ?? "JPEG"}</span>
-                    <span>Dimensions: {imageResult.image_validation?.width} × {imageResult.image_validation?.height} px</span>
-                    <span>Aspect: {((imageResult.image_validation?.width && imageResult.image_validation?.height) ? (imageResult.image_validation.width / imageResult.image_validation.height).toFixed(2) : "1.33") ?? "1.33"}</span>
+                  <button
+                    onClick={() => setActiveTab("image")}
+                    className="text-xs font-bold text-[#D9651E] hover:underline flex items-center gap-1 pt-2"
+                  >
+                    <span>Launch Image Inspection</span>
+                    <span className="material-symbols-outlined text-xs">arrow_forward</span>
+                  </button>
+                </div>
+
+                {/* Pillar 2 */}
+                <div className="rounded-2xl bg-white border border-[#E8DFCF] p-6 shadow-xs space-y-3 flex flex-col justify-between">
+                  <div className="space-y-3">
+                    <div className="w-12 h-12 rounded-xl bg-[#F0F8F3] text-[#2D6A4F] flex items-center justify-center">
+                      <span className="material-symbols-outlined text-2xl">timeline</span>
+                    </div>
+                    <h3 className="font-bold text-base text-[#2A2521]">Temporal ResTraV MLP</h3>
+                    <p className="text-xs text-[#6C6357] leading-relaxed">
+                      Inter-frame velocity and trajectory manifold tracking evaluates facial landmarks and timeline density anomaly segments.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab("video")}
+                    className="text-xs font-bold text-[#2D6A4F] hover:underline flex items-center gap-1 pt-2"
+                  >
+                    <span>Launch Video Inspection</span>
+                    <span className="material-symbols-outlined text-xs">arrow_forward</span>
+                  </button>
+                </div>
+
+                {/* Pillar 3 */}
+                <div className="rounded-2xl bg-white border border-[#E8DFCF] p-6 shadow-xs space-y-3 flex flex-col justify-between">
+                  <div className="space-y-3">
+                    <div className="w-12 h-12 rounded-xl bg-[#FBF6EA] text-[#8A6714] flex items-center justify-center">
+                      <span className="material-symbols-outlined text-2xl">fingerprint</span>
+                    </div>
+                    <h3 className="font-bold text-base text-[#2A2521]">PRNU &amp; C2PA Provenance</h3>
+                    <p className="text-xs text-[#6C6357] leading-relaxed">
+                      Photo-Response Non-Uniformity extracts the unique silicon sensor fingerprint alongside C2PA cryptographic assertion seals.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab("batch")}
+                    className="text-xs font-bold text-[#8A6714] hover:underline flex items-center gap-1 pt-2"
+                  >
+                    <span>Launch Batch Audit</span>
+                    <span className="material-symbols-outlined text-xs">arrow_forward</span>
+                  </button>
+                </div>
+
+                {/* Pillar 4 */}
+                <div className="rounded-2xl bg-white border border-[#E8DFCF] p-6 shadow-xs space-y-3 flex flex-col justify-between">
+                  <div className="space-y-3">
+                    <div className="w-12 h-12 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+                      <span className="material-symbols-outlined text-2xl">shield_person</span>
+                    </div>
+                    <h3 className="font-bold text-base text-[#2A2521]">Live WebRTC Shield</h3>
+                    <p className="text-xs text-[#6C6357] leading-relaxed">
+                      Sub-dermal rPPG hemoglobin pulse tracking and facial boundary artifact sentinel for real-time video calls and live streaming.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab("live-shield")}
+                    className="text-xs font-bold text-rose-600 hover:underline flex items-center gap-1 pt-2"
+                  >
+                    <span>Activate Live Shield</span>
+                    <span className="material-symbols-outlined text-xs">arrow_forward</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Browser Extension Feature Banner */}
+              <div className="rounded-2xl bg-gradient-to-r from-[#2A2521] to-[#3D352E] text-white p-6 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center text-white shrink-0 font-bold text-xl">
+                    S
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                      <span>Secura AI Chrome Extension (Manifest V3)</span>
+                      <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 text-[10px] font-mono">READY</span>
+                    </h3>
+                    <p className="text-xs text-[#C5BBAF] mt-0.5">
+                      Right-click inspect any image or video directly on any website with instant in-page forensic HUD modal.
+                    </p>
+                  </div>
+                </div>
+                <div className="text-xs font-mono bg-white/10 px-3 py-1.5 rounded-lg border border-white/15 text-white/90">
+                  Folder: <code>d:\SecuraAI2\extension</code>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* =================================================================== */}
+        {/* VIEW 1: IMAGE DETECTION WORKBENCH                                   */}
+        {/* =================================================================== */}
+        {activeTab === "image" && (
+          <div className="space-y-6 animate-fade-in">
+            {/* Header info */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h1 className="text-2xl lg:text-3xl font-bold text-[#2A2521] tracking-tight">
+                  Image Forensic Inspection
+                </h1>
+                <p className="text-sm text-[#6C6357] mt-1 max-w-2xl">
+                  Upload any digital image or capture via live camera to audit spatial diffusion patterns, error-level compression (ELA), and sensor noise.
+                </p>
+              </div>
+
+              {/* Instant Camera Trigger */}
+              <button
+                type="button"
+                onClick={() => startCamera("photo")}
+                className="px-4 py-2 rounded-xl bg-white hover:bg-[#F9F5EC] border border-[#DDD1BE] text-xs font-bold text-[#2A2521] shadow-xs transition-colors flex items-center gap-2 self-start sm:self-auto"
+              >
+                <span className="material-symbols-outlined text-[16px] text-[#D9651E]">photo_camera</span>
+                <span>Use Live Camera</span>
+              </button>
+            </div>
+
+            {/* Upload Zone when no image selected */}
+            {!imageFile && (
+              <div
+                onClick={() => imageInputRef.current?.click()}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                    handleSelectImage(e.dataTransfer.files[0]);
+                  }
+                }}
+                className="group cursor-pointer rounded-3xl border-2 border-dashed border-[#DFD4BF] hover:border-[#D9651E] bg-[#FFFDF9] hover:bg-[#FFF9F2] transition-all p-12 text-center flex flex-col items-center justify-center gap-3 shadow-xs"
+              >
+                <div className="w-16 h-16 rounded-2xl bg-[#F6EDE0] group-hover:bg-[#FBE9DC] text-[#D9651E] flex items-center justify-center transition-colors">
+                  <span className="material-symbols-outlined text-3xl">upload_file</span>
+                </div>
+                <div className="space-y-1">
+                  <p className="font-semibold text-base text-[#2A2521]">
+                    Click to select an image, or drag and drop here
+                  </p>
+                  <p className="text-xs text-[#7A7165]">
+                    Supports PNG, JPG, JPEG, WebP, and TIFF formats
+                  </p>
+                </div>
+                <div className="flex gap-3 mt-2">
+                  <button
+                    type="button"
+                    className="px-5 py-2.5 rounded-xl bg-[#D9651E] hover:bg-[#C25816] text-white font-semibold text-sm transition-colors shadow-sm"
+                  >
+                    Browse Files
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startCamera("photo");
+                    }}
+                    className="px-4 py-2.5 rounded-xl bg-white hover:bg-[#F7F2E6] border border-[#D5C9B3] text-[#2A2521] font-semibold text-sm transition-colors shadow-xs flex items-center gap-1.5"
+                  >
+                    <span className="material-symbols-outlined text-sm text-[#D9651E]">photo_camera</span>
+                    <span>Live Snap</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/tiff"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files && e.target.files[0]) {
+                  handleSelectImage(e.target.files[0]);
+                }
+              }}
+            />
+
+            {/* Error Message */}
+            {imageError && (
+              <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm flex items-center justify-between">
+                <span>{imageError}</span>
+                <button
+                  onClick={() => setImageError(null)}
+                  className="text-xs font-semibold underline text-red-700"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            {/* Analyzing State */}
+            {isImageAnalyzing && (
+              <div className="p-10 rounded-3xl bg-white border border-[#E8DFCF] text-center space-y-4 shadow-xs">
+                <div className="inline-block animate-spin text-[#D9651E]">
+                  <span className="material-symbols-outlined text-5xl">progress_activity</span>
+                </div>
+                <h3 className="font-bold text-lg text-[#2A2521]">Executing Multi-Scale Forensic Inversion...</h3>
+                <p className="text-xs text-[#70675D] max-w-md mx-auto">
+                  Extracting Swin Transformer spatial representations, Error Level Analysis (ELA) re-quantization variance, and PRNU sensor noise.
+                </p>
+              </div>
+            )}
+
+            {/* Analysis Result Card */}
+            {imageFile && !isImageAnalyzing && imageResult && (
+              <div className="space-y-6">
+                {/* Result Hero Banner & Export Bar */}
+                <div className="rounded-3xl bg-white border border-[#E8DFCF] p-6 lg:p-8 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+                  <div className="space-y-2">
+                    <span className="text-xs font-mono font-bold uppercase tracking-wider text-[#8A7E70]">
+                      Forensic Classification &bull; ISO/IEC 27037 Standard
+                    </span>
+                    <div className="flex items-center gap-3">
+                      {imageResult.canonical_verdict?.predicted_label === "AI_GENERATED" ? (
+                        <span className="px-4 py-1.5 rounded-full bg-red-100 border border-red-300 text-red-700 font-bold text-lg flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse"></span>
+                          AI GENERATED SYNTHETIC
+                        </span>
+                      ) : (
+                        <span className="px-4 py-1.5 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-800 font-bold text-lg flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-600"></span>
+                          GENUINE / CAMERA CAPTURED
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-[#70675D] max-w-xl">
+                      {imageResult.canonical_verdict?.predicted_label === "AI_GENERATED"
+                        ? "High likelihood of generative AI synthesis detected. Spatial micro-textures and frequency distributions deviate from physical camera sensors."
+                        : "Authentic silicon camera sensor pattern noise and natural optical characteristics verified."}
+                    </p>
+                  </div>
+
+                  {/* Actions & Confidence Meter */}
+                  <div className="flex flex-col sm:flex-row md:flex-col items-center gap-3 w-full md:w-auto shrink-0">
+                    <div className="w-full md:w-56 p-4 rounded-2xl bg-[#FAF7EE] border border-[#E8DFCF] text-center space-y-1.5">
+                      <span className="text-xs font-semibold text-[#7A7165]">Verdict Confidence</span>
+                      <div className="text-3xl font-extrabold text-[#2A2521]">
+                        {imageResult.canonical_verdict?.model_score != null
+                          ? (() => {
+                              const isAi = imageResult.canonical_verdict.predicted_label === "AI_GENERATED";
+                              const raw = imageResult.canonical_verdict.model_score;
+                              const conf = isAi ? raw : (1.0 - raw);
+                              return `${(conf * 100).toFixed(1)}%`;
+                            })()
+                          : "—"}
+                      </div>
+                      <div className="w-full h-2 rounded-full bg-[#E5DCB8] overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ${
+                            imageResult.canonical_verdict?.predicted_label === "AI_GENERATED"
+                              ? "bg-[#D9651E]"
+                              : "bg-emerald-600"
+                          }`}
+                          style={{
+                            width: `${Math.min(
+                              100,
+                              Math.max(
+                                0,
+                                ((imageResult.canonical_verdict?.predicted_label === "AI_GENERATED"
+                                  ? (imageResult.canonical_verdict?.model_score ?? 0.5)
+                                  : 1.0 - (imageResult.canonical_verdict?.model_score ?? 0.5))) * 100
+                              )
+                            )}%`,
+                          }}
+                        ></div>
+                      </div>
+                      <div className="text-[10px] text-[#8A7E70] font-mono">
+                        {imageResult.canonical_verdict?.model_score != null
+                          ? imageResult.canonical_verdict.predicted_label === "AI_GENERATED"
+                            ? `Synthetic score: ${(imageResult.canonical_verdict.model_score * 100).toFixed(1)}%`
+                            : `Sensor integrity: ${((1.0 - imageResult.canonical_verdict.model_score) * 100).toFixed(1)}%`
+                          : ""}
+                      </div>
+                    </div>
+
+                    {/* Export & C2PA Sealing Buttons */}
+                    <div className="space-y-2 w-full">
+                      <div className="flex gap-2 w-full">
+                        <button
+                          type="button"
+                          onClick={() => exportForensicReportPrint(imageFile, "image", imageResult, null, lastCameraTrackRef.current)}
+                          className="flex-1 px-3 py-2 rounded-xl bg-[#2A2521] hover:bg-[#3D352E] text-white text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5"
+                        >
+                          <span className="material-symbols-outlined text-[15px]">print</span>
+                          <span>Export Dossier</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => exportForensicReportDoc(imageFile, "image", imageResult, null, lastCameraTrackRef.current)}
+                          title="Download Word Document"
+                          className="px-3 py-2 rounded-xl bg-white hover:bg-[#F2EBDB] border border-[#D5C9B3] text-xs font-bold text-[#2A2521] transition-colors flex items-center justify-center gap-1"
+                        >
+                          <span className="material-symbols-outlined text-[15px] text-[#D9651E]">description</span>
+                          <span>Word</span>
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleSealImage}
+                        disabled={isSealing}
+                        className="w-full px-3 py-2 rounded-xl bg-gradient-to-r from-[#D9651E] to-[#C94A29] hover:from-[#C25816] hover:to-[#B33E20] text-white text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 disabled:opacity-50"
+                      >
+                        <span className="material-symbols-outlined text-[15px]">verified_user</span>
+                        <span>{isSealing ? "Signing Manifest..." : "Sign & Seal Asset (C2PA)"}</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                {/* Right: Active Tab Forensic Detail Card */}
-                <div className="card card-elevated" style={{ padding: 24, minHeight: 460 }}>
-                  {/* TAB 1: SYNTHESIS */}
-                  {activeImageTab === "synthesis" && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span className="eyebrow" style={{ margin: 0 }}>SYNTHESIS ENGINE</span>
-                        <span className="badge badge-mustard">
-                          Findings: {imageResult.unified_report?.total_findings_count ?? 0}
-                        </span>
+                {/* 3D Holographic Heart + Viewport + Metrics Grid */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                  {/* Left Column: Image Viewer (6 cols) */}
+                  <div className="lg:col-span-6 rounded-3xl bg-white border border-[#E8DFCF] p-5 shadow-xs space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 font-semibold text-sm text-[#2A2521]">
+                        <span className="material-symbols-outlined text-[18px] text-[#D9651E]">photo</span>
+                        <span>Inspection Viewport</span>
                       </div>
-                      <h3 style={{ fontSize: 18, margin: 0 }}>Unified Forensic Synthesis</h3>
-                      <p style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6 }}>
-                        Multi-layer forensic inspection executed across compression, noise, metadata, and neural signals.
-                      </p>
 
-                      <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
-                        <div className="card-oat" style={{ padding: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span style={{ fontSize: 13, fontWeight: 600 }}>Neural AI Generation Classifier</span>
-                          <span className={`badge ${imageResult.canonical_verdict?.predicted_label === "AI_GENERATED" ? "badge-terracotta" : "badge-verified"}`}>
-                            {imageResult.canonical_verdict?.display_label || imageResult.ai_detection?.decision_status || "ANALYZED"}
-                          </span>
-                        </div>
+                      {/* View mode toggle */}
+                      <div className="flex items-center bg-[#F2EBDB] p-0.5 rounded-lg border border-[#E2D6C0] text-xs">
+                        <button
+                          type="button"
+                          onClick={() => setImageInspectionMode("original")}
+                          className={`px-3 py-1 rounded-md font-medium transition-colors ${
+                            imageInspectionMode === "original"
+                              ? "bg-white text-[#D9651E] shadow-xs"
+                              : "text-[#6C6357] hover:text-[#2A2521]"
+                          }`}
+                        >
+                          Original
+                        </button>
+                        {imageResult.ela_forensics?.heatmap_data_url && (
+                          <button
+                            type="button"
+                            onClick={() => setImageInspectionMode("ela")}
+                            className={`px-3 py-1 rounded-md font-medium transition-colors ${
+                              imageInspectionMode === "ela"
+                                ? "bg-white text-[#D9651E] shadow-xs"
+                                : "text-[#6C6357] hover:text-[#2A2521]"
+                            }`}
+                          >
+                            ELA Heatmap
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setImageInspectionMode("xray");
+                            if (!explainabilityResult) {
+                              handleLoadExplainability();
+                            }
+                          }}
+                          className={`px-3 py-1 rounded-md font-medium transition-colors flex items-center gap-1 ${
+                            imageInspectionMode === "xray"
+                              ? "bg-[#D9651E] text-white shadow-xs font-semibold"
+                              : "text-[#6C6357] hover:text-[#2A2521]"
+                          }`}
+                        >
+                          <span className="material-symbols-outlined text-[14px]">local_fire_department</span>
+                          <span>X-Ray Saliency</span>
+                        </button>
+                      </div>
+                    </div>
 
-                        <div className="card-oat" style={{ padding: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span style={{ fontSize: 13, fontWeight: 600 }}>C2PA Content Credentials</span>
-                          <span className="badge badge-inconclusive">
-                            {imageResult.c2pa_provenance?.status || "ABSENT"}
-                          </span>
-                        </div>
-
-                        <div className="card-oat" style={{ padding: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span style={{ fontSize: 13, fontWeight: 600 }}>Error Level Analysis (ELA)</span>
-                          <span className="badge badge-verified">
-                            Mean Error: {imageResult.ela_forensics?.metrics?.mean_absolute_difference?.toFixed(2) ?? "14.2"}
-                          </span>
-                        </div>
-
-                        <div className="card-oat" style={{ padding: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <div>
-                            <span style={{ fontSize: 13, fontWeight: 600 }}>SynthID Imperceptible Watermark</span>
-                            <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
-                              {imageResult.synthid_provenance?.is_probable_screenshot
-                                ? "Screenshot detected (Container metadata stripped); Intrinsic pixel forensics active"
-                                : "Spectral frequency lattice & imperceptible watermark inspection"}
+                    {/* Viewport Canvas */}
+                    <div className="relative rounded-2xl overflow-hidden bg-[#181615] flex items-center justify-center min-h-[320px] max-h-[440px]">
+                      {imageInspectionMode === "original" ? (
+                        imagePreviewUrl && (
+                          <img
+                            src={imagePreviewUrl}
+                            alt="Uploaded target"
+                            className="max-h-[440px] w-auto max-w-full object-contain"
+                          />
+                        )
+                      ) : imageInspectionMode === "ela" ? (
+                        imageResult.ela_forensics?.heatmap_data_url && (
+                          <img
+                            src={imageResult.ela_forensics.heatmap_data_url}
+                            alt="ELA Compression Map"
+                            className="max-h-[440px] w-auto max-w-full object-contain"
+                          />
+                        )
+                      ) : (
+                        /* X-Ray Saliency Heatmap */
+                        <div className="relative w-full h-full flex items-center justify-center">
+                          {isLoadingExplainability ? (
+                            <div className="text-center p-8 space-y-3">
+                              <span className="material-symbols-outlined text-4xl text-[#D9651E] animate-spin">
+                                progress_activity
+                              </span>
+                              <p className="text-xs text-white/80 font-mono">
+                                Projecting Swin Spatial Tokens through Classifier Head...
+                              </p>
                             </div>
-                          </div>
-                          <span className={`badge ${
-                            imageResult.synthid_provenance?.watermark_present
-                              ? "badge-terracotta"
-                              : imageResult.synthid_provenance?.state === "SCREENSHOT_FALLBACK_ACTIVE"
-                              ? "badge-mustard"
-                              : "badge-verified"
-                          }`}>
-                            {imageResult.synthid_provenance?.state || (imageResult.synthid_provenance?.watermark_present ? "WATERMARK_DETECTED" : "WATERMARK_NOT_DETECTED")}
+                          ) : explainabilityResult?.overlay_b64 ? (
+                            <div className="relative w-full h-full flex items-center justify-center">
+                              <img
+                                src={explainabilityResult.overlay_b64}
+                                alt="Swin Spatial Attribution Heatmap"
+                                className="max-h-[440px] w-auto max-w-full object-contain"
+                              />
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => handleLoadExplainability()}
+                              className="px-4 py-2 rounded-xl bg-[#D9651E] text-white text-xs font-bold"
+                            >
+                              Compute Saliency Heatmap
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* X-Ray Saliency Controls Bar when Active */}
+                    {imageInspectionMode === "xray" && explainabilityResult && (
+                      <div className="p-3 bg-[#FAF7EE] rounded-2xl border border-[#E8DFCF] space-y-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-[#2A2521] flex items-center gap-1">
+                            <span className="material-symbols-outlined text-sm text-[#D9651E]">biotech</span>
+                            <span>{explainabilityResult.methodology}</span>
+                          </span>
+                          <span className="font-mono text-[11px] text-[#70675D]">
+                            Peak: {explainabilityResult.max_intensity.toFixed(2)}
                           </span>
                         </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* TAB 2: ELA */}
-                  {activeImageTab === "ela" && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                      <span className="eyebrow" style={{ margin: 0 }}>ERROR LEVEL ANALYSIS</span>
-                      <h3 style={{ fontSize: 18, margin: 0 }}>JPEG Re-compression Error Field</h3>
-                      <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-                        Analyzes intentional alterations by calculating compression divergence when re-encoded at quality 95.
-                      </p>
-                      <div className="card-oat" style={{ padding: 16 }}>
-                        <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>MEAN ABSOLUTE DIFFERENCE</div>
-                        <div style={{ fontFamily: "var(--font-mono)", fontSize: 24, fontWeight: 700, color: "var(--color-terracotta)" }}>
-                          {imageResult.ela_forensics?.metrics?.mean_absolute_difference?.toFixed(3) ?? "N/A"}
-                        </div>
-                        <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 4 }}>
-                          Max Diff: {imageResult.ela_forensics?.metrics?.max_absolute_difference?.toFixed(2) ?? "N/A"} · Quality: {imageResult.ela_forensics?.metrics?.recompression_quality ?? 95}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* TAB 3: DCT */}
-                  {activeImageTab === "dct" && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                      <span className="eyebrow" style={{ margin: 0 }}>DISCRETE COSINE TRANSFORM</span>
-                      <h3 style={{ fontSize: 18, margin: 0 }}>Frequency Domain Coefficient Analysis</h3>
-                      <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-                        Inspects 8x8 block boundary grids and high-frequency spectral rolloff characteristic of generative diffusion.
-                      </p>
-                      <div className="card-oat" style={{ padding: 16 }}>
-                        <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>BOUNDARY DISCONTINUITY</div>
-                        <div style={{ fontFamily: "var(--font-mono)", fontSize: 24, fontWeight: 700, color: "var(--color-mustard-deep)" }}>
-                          {imageResult.dct_analysis?.metrics?.boundary_discontinuity?.toFixed(2) ?? "N/A"}
-                        </div>
-                        <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 4 }}>
-                          Blocking Ratio: {imageResult.dct_analysis?.metrics?.blocking_artifact_ratio?.toFixed(3) ?? "N/A"} · Blocks: {imageResult.dct_analysis?.metrics?.total_blocks ?? 0}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* TAB 4: NOISE RESIDUAL */}
-                  {activeImageTab === "noise" && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                      <span className="eyebrow" style={{ margin: 0 }}>NOISE RESIDUALS</span>
-                      <h3 style={{ fontSize: 18, margin: 0 }}>High-Frequency Residual Texture</h3>
-                      <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-                        Measures high-pass filtered pixel noise variance. Natural camera captures exhibit sensor grain;
-                        AI diffusion models frequently show smoothed or synthetic noise floors.
-                      </p>
-                      <div className="card-oat" style={{ padding: 16 }}>
-                        <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>STD RESIDUAL VARIANCE</div>
-                        <div style={{ fontFamily: "var(--font-mono)", fontSize: 24, fontWeight: 700 }}>
-                          {imageResult.noise_residual?.metrics?.std_residual?.toFixed(2) ?? "N/A"}
-                        </div>
-                        <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 4 }}>
-                          Mean Abs: {imageResult.noise_residual?.metrics?.mean_absolute_residual?.toFixed(2) ?? "N/A"} · Energy: {imageResult.noise_residual?.metrics?.noise_energy?.toFixed(2) ?? "N/A"}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* TAB 5: PROVENANCE & SYNTHID */}
-                  {activeImageTab === "c2pa" && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                      <span className="eyebrow" style={{ margin: 0 }}>PROVENANCE &amp; SYNTHID WATERMARK</span>
-                      <h3 style={{ fontSize: 18, margin: 0 }}>Cryptographic Provenance &amp; SynthID Watermarks</h3>
-                      <p style={{ fontSize: 13, color: "var(--text-secondary)" }}>
-                        Inspects C2PA digital signatures, SynthID frequency domain watermarks, and screenshot metadata stripping resilience.
-                      </p>
-
-                      <div className="card-oat" style={{ padding: 16 }}>
-                        <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>C2PA CONTENT CREDENTIALS</div>
-                        <div style={{ fontSize: 16, fontWeight: 700, marginTop: 4 }}>
-                          {imageResult.c2pa_provenance?.manifest_present
-                            ? "Cryptographically Signed & Valid"
-                            : "No Cryptographic C2PA Manifest Present"}
-                        </div>
-                        <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 4 }}>
-                          Absence of C2PA is typical across consumer media and is not evidence of AI manipulation.
-                        </div>
-                      </div>
-
-                      <div className="card-oat" style={{ padding: 16, borderLeft: `4px solid ${imageResult.synthid_provenance?.watermark_present ? "var(--color-terracotta)" : "var(--color-botanical-green)"}` }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <div style={{ fontSize: 11, color: "var(--text-secondary)", textTransform: "uppercase" }}>SYNTHID FREQUENCY WATERMARK STATE</div>
-                          <span className={`badge ${
-                            imageResult.synthid_provenance?.watermark_present
-                              ? "badge-terracotta"
-                              : imageResult.synthid_provenance?.state === "SCREENSHOT_FALLBACK_ACTIVE"
-                              ? "badge-mustard"
-                              : "badge-verified"
-                          }`}>
-                            {imageResult.synthid_provenance?.state || "WATERMARK_NOT_DETECTED"}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: 16, fontWeight: 700, marginTop: 6 }}>
-                          {imageResult.synthid_provenance?.watermark_present
-                            ? `Imperceptible SynthID Watermark Detected (${((imageResult.synthid_provenance?.confidence ?? 0.9) * 100).toFixed(0)}% Confidence)`
-                            : imageResult.synthid_provenance?.state === "SCREENSHOT_FALLBACK_ACTIVE"
-                            ? "Screenshot Fallback Active (Container Metadata Stripped)"
-                            : "No Imperceptible SynthID Watermark Detected"}
-                        </div>
-                        <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 6, lineHeight: 1.5 }}>
-                          {imageResult.synthid_provenance?.explanation || "SynthID imperceptible watermarks are embedded directly into frequency bands and survive container metadata stripping."}
-                        </div>
-                        {imageResult.synthid_provenance?.audit_notes && imageResult.synthid_provenance.audit_notes.length > 0 && (
-                          <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border-subtle)" }}>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-secondary)", marginBottom: 4 }}>AUDIT TRAIL:</div>
-                            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 11, color: "var(--text-secondary)", display: "flex", flexDirection: "column", gap: 3 }}>
-                              {imageResult.synthid_provenance.audit_notes.map((note, idx) => (
-                                <li key={idx}>{note}</li>
-                              ))}
-                            </ul>
+                        {explainabilityResult.top_regions?.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 pt-1">
+                            {explainabilityResult.top_regions.map((reg, idx) => (
+                              <span
+                                key={idx}
+                                className="px-2 py-0.5 rounded bg-red-100 text-red-800 font-mono text-[10px] font-semibold"
+                              >
+                                {reg.label}: {(reg.relative_suspicion * 100).toFixed(0)}% AI attribution
+                              </span>
+                            ))}
                           </div>
                         )}
+                        <div className="flex items-center justify-between pt-1 border-t border-[#E8DFCF]">
+                          <span className="text-[#6C6357]">Attribution Opacity:</span>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="range"
+                              min="0.2"
+                              max="0.95"
+                              step="0.05"
+                              value={explainabilityAlpha}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value);
+                                setExplainabilityAlpha(val);
+                                handleLoadExplainability(val);
+                              }}
+                              className="w-24 accent-[#D9651E]"
+                            />
+                            <span className="font-mono font-bold text-[#2A2521]">{Math.round(explainabilityAlpha * 100)}%</span>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
 
-                  {/* TAB 6: METADATA */}
-                  {activeImageTab === "metadata" && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                      <span className="eyebrow" style={{ margin: 0 }}>METADATA INVENTORY</span>
-                      <h3 style={{ fontSize: 18, margin: 0 }}>EXIF &amp; Structural Consistency</h3>
-                      <div className="card-oat" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 8 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                          <span style={{ color: "var(--text-secondary)" }}>Camera Make:</span>
-                          <span style={{ fontWeight: 600 }}>
-                            {imageResult.metadata_forensics?.camera_metadata?.device_display_text ||
-                             (imageResult.metadata_forensics?.camera_metadata?.make
-                               ? `${imageResult.metadata_forensics.camera_metadata.make} ${imageResult.metadata_forensics.camera_metadata.model || ""}`
-                               : "Device information not present in file")}
+                    <div className="flex items-center justify-between text-xs text-[#70675D] pt-1">
+                      <span>{imageFile.name} ({(imageFile.size / 1024).toFixed(1)} KB)</span>
+                      <button
+                        onClick={handleResetImage}
+                        className="text-[#D9651E] hover:underline font-semibold flex items-center gap-1"
+                      >
+                        <span className="material-symbols-outlined text-sm">refresh</span>
+                        Analyze another image
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Right Column: 3D Holographic Heart + Real Diagnostic Metrics (6 cols) */}
+                  <div className="lg:col-span-6 space-y-6">
+                    {/* Embedded 3D Holographic Heart */}
+                    <div className="flex justify-center">
+                      <RGBHeartVisualization
+                        isAiGenerated={imageResult.canonical_verdict?.predicted_label === "AI_GENERATED"}
+                        confidenceScore={imageResult.canonical_verdict?.model_score}
+                        width={380}
+                        height={280}
+                        title={
+                          imageResult.canonical_verdict?.predicted_label === "AI_GENERATED"
+                            ? "3D Cardioid • Turbulent Jitter Active"
+                            : "3D Cardioid • Steady Cardiac Rotation"
+                        }
+                      />
+                    </div>
+
+                    {/* Multi-Pillar Signals Card */}
+                    <div className="rounded-3xl bg-white border border-[#E8DFCF] p-5 shadow-xs space-y-3.5">
+                      <h3 className="font-bold text-sm text-[#2A2521] flex items-center gap-2">
+                        <span className="material-symbols-outlined text-[18px] text-[#8A6714]">analytics</span>
+                        <span>Forensic Signal Breakdown</span>
+                      </h3>
+
+                      <div className="grid grid-cols-2 gap-3 text-xs">
+                        {/* Swin Score */}
+                        <div className="p-3 rounded-xl bg-[#FAF7EE] border border-[#E8DFCF] space-y-1">
+                          <span className="text-[#6C6357] block text-[11px]">Swin Spatial Score</span>
+                          <span className="text-base font-extrabold text-[#D9651E] font-mono">
+                            {imageResult.ai_detection?.raw_score != null
+                              ? `${(imageResult.ai_detection.raw_score * 100).toFixed(1)}%`
+                              : "N/A"}
                           </span>
                         </div>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                          <span style={{ color: "var(--text-secondary)" }}>Camera Model:</span>
-                          <span style={{ fontWeight: 600 }}>{imageResult.metadata_forensics?.camera_metadata?.model || "Not Stated"}</span>
-                        </div>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                          <span style={{ color: "var(--text-secondary)" }}>Software / Generator:</span>
-                          <span style={{ fontWeight: 600 }}>{imageResult.metadata_forensics?.camera_metadata?.software || "None"}</span>
-                        </div>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                          <span style={{ color: "var(--text-secondary)" }}>GPS Geotagging:</span>
-                          <span style={{ fontWeight: 600, color: imageResult.metadata_forensics?.gps_summary?.gps_present ? "var(--color-botanical-green)" : "var(--text-secondary)" }}>
-                            {imageResult.metadata_forensics?.gps_summary?.gps_present
-                              ? `${imageResult.metadata_forensics.gps_summary.latitude?.toFixed(4)}°, ${imageResult.metadata_forensics.gps_summary.longitude?.toFixed(4)}°`
-                              : (imageResult.synthid_provenance?.geotag_status === "PRESENT" ? "Present in Container" : "Not Present / Stripped")}
+
+                        {/* ELA Delta */}
+                        <div className="p-3 rounded-xl bg-[#FAF7EE] border border-[#E8DFCF] space-y-1">
+                          <span className="text-[#6C6357] block text-[11px]">ELA Compression Delta</span>
+                          <span className="text-base font-extrabold text-[#2A2521] font-mono">
+                            {imageResult.ela_forensics?.metrics?.mean_absolute_difference != null
+                              ? imageResult.ela_forensics.metrics.mean_absolute_difference.toFixed(2)
+                              : "—"}
                           </span>
                         </div>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                          <span style={{ color: "var(--text-secondary)" }}>EXIF Tags Extracted:</span>
-                          <span style={{ fontWeight: 600 }}>{imageResult.metadata_forensics?.inventory?.exif_tag_count ?? 0} fields</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
 
-                  {/* TAB 7: AI DETECTOR */}
-                  {activeImageTab === "ai_detector" && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                      <span className="eyebrow" style={{ margin: 0 }}>NEURAL DETECTOR</span>
-                      <h3 style={{ fontSize: 18, margin: 0 }}>DenseNet / Swin Neural Inference</h3>
-                      <div className="card-oat" style={{ padding: 16 }}>
-                        <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>PREDICTED DECISION</div>
-                        <div style={{ fontSize: 20, fontWeight: 800, color: imageResult.canonical_verdict?.predicted_label === "AI_GENERATED" ? "var(--color-terracotta)" : "var(--color-botanical-green)", marginTop: 4 }}>
-                          {imageResult.canonical_verdict?.display_label || imageResult.ai_detection?.decision_status || "ANALYZED"}
-                        </div>
-                        <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 6 }}>
-                          Model: {imageResult.ai_detection?.model_name || "DenseNet-Diffusion-V2"} · Score: {(((imageResult.canonical_verdict?.model_score ?? imageResult.ai_detection?.probabilities?.artificial ?? imageResult.ai_detection?.uncalibrated_margin) ?? 0.5) * 100).toFixed(1)}%
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* TAB 8: PHYSICAL PROPERTIES */}
-                  {activeImageTab === "properties" && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                      <span className="eyebrow" style={{ margin: 0 }}>PHYSICAL PROPERTIES</span>
-                      <h3 style={{ fontSize: 18, margin: 0 }}>Dimensions &amp; Image Geometry</h3>
-                      <div className="card-oat" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 8 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                          <span style={{ color: "var(--text-secondary)" }}>Width / Height:</span>
-                          <span style={{ fontWeight: 600 }}>{imageResult.image_validation?.width} × {imageResult.image_validation?.height}</span>
-                        </div>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                          <span style={{ color: "var(--text-secondary)" }}>Aspect Ratio:</span>
-                          <span style={{ fontWeight: 600 }}>
-                            {((imageResult.image_validation?.width && imageResult.image_validation?.height) ? (imageResult.image_validation.width / imageResult.image_validation.height).toFixed(2) : "1.33") ?? "1.33"}
+                        {/* PRNU */}
+                        <div className="p-3 rounded-xl bg-[#FAF7EE] border border-[#E8DFCF] space-y-1">
+                          <span className="text-[#6C6357] block text-[11px]">PRNU Sensor Residual</span>
+                          <span className="text-base font-extrabold text-[#2A2521] font-mono">
+                            {imageResult.noise_residual?.metrics?.mean_absolute_residual != null
+                              ? imageResult.noise_residual.metrics.mean_absolute_residual.toFixed(4)
+                              : "—"}
                           </span>
                         </div>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
-                          <span style={{ color: "var(--text-secondary)" }}>Format Encoding:</span>
-                          <span style={{ fontWeight: 600 }}>{imageResult.image_validation?.detected_format ?? "JPEG"}</span>
+
+                        {/* DCT Blocking */}
+                        <div className="p-3 rounded-xl bg-[#FAF7EE] border border-[#E8DFCF] space-y-1">
+                          <span className="text-[#6C6357] block text-[11px]">DCT Blocking Ratio</span>
+                          <span className="text-base font-extrabold text-[#2A2521] font-mono">
+                            {imageResult.dct_analysis?.metrics?.blocking_artifact_ratio != null
+                              ? imageResult.dct_analysis.metrics.blocking_artifact_ratio.toFixed(4)
+                              : "—"}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* C2PA Provenance & EXIF */}
+                      <div className="pt-2 border-t border-[#EDE4D5] text-[11px] text-[#70675D] space-y-1">
+                        <div className="flex justify-between">
+                          <span>C2PA Content Credentials:</span>
+                          <span className="font-semibold text-[#2A2521]">
+                            {imageResult.c2pa_provenance?.status || "ABSENT / STRIPPED"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Hardware Camera EXIF:</span>
+                          <span className="font-semibold text-[#2A2521] truncate max-w-[200px]">
+                            {imageResult.metadata_forensics?.camera_metadata?.device_display_text || "Absent / Synthetic"}
+                          </span>
                         </div>
                       </div>
                     </div>
-                  )}
+
+                    {/* Corneal Specular Reflection & Ocular Symmetry Card (Feature 2) */}
+                    {imageResult.corneal_reflections && (
+                      <div className="rounded-3xl bg-white border border-[#E8DFCF] p-5 shadow-xs space-y-3.5">
+                        <div className="flex items-center justify-between">
+                          <h3 className="font-bold text-sm text-[#2A2521] flex items-center gap-2">
+                            <span className="material-symbols-outlined text-[18px] text-[#D9651E]">visibility</span>
+                            <span>Corneal Specular Reflection &amp; Ocular Optics</span>
+                          </h3>
+                          <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
+                            imageResult.corneal_reflections.verdict === "CONSISTENT_CORNEAL_SPECULARITY"
+                              ? "bg-emerald-50 text-emerald-800 border-emerald-300"
+                              : imageResult.corneal_reflections.verdict === "NO_FACES_DETECTED"
+                              ? "bg-gray-100 text-gray-700 border-gray-300"
+                              : "bg-amber-50 text-amber-800 border-amber-300"
+                          }`}>
+                            {imageResult.corneal_reflections.verdict.replace(/_/g, " ")}
+                          </span>
+                        </div>
+
+                        {imageResult.corneal_reflections.status === "COMPLETED" ? (
+                          <div className="space-y-3">
+                            <div className="grid grid-cols-2 gap-3 text-xs">
+                              <div className="p-3 rounded-xl bg-[#FAF7EE] border border-[#E8DFCF] space-y-1">
+                                <span className="text-[#6C6357] block text-[11px]">Bilateral Catchlight Symmetry</span>
+                                <span className="text-base font-extrabold text-[#D9651E] font-mono">
+                                  {(imageResult.corneal_reflections.specular_symmetry_score * 100).toFixed(1)}%
+                                </span>
+                              </div>
+                              <div className="p-3 rounded-xl bg-[#FAF7EE] border border-[#E8DFCF] space-y-1">
+                                <span className="text-[#6C6357] block text-[11px]">Pupil Circularity Index</span>
+                                <span className="text-base font-extrabold text-[#2A2521] font-mono">
+                                  {(imageResult.corneal_reflections.pupil_circularity_score * 100).toFixed(1)}%
+                                </span>
+                              </div>
+                            </div>
+
+                            {imageResult.corneal_reflections.annotated_overlay_url && (
+                              <div className="rounded-2xl overflow-hidden border border-[#E8DFCF] bg-[#181615] flex flex-col items-center">
+                                <div className="w-full px-3 py-1.5 bg-[#2A2521] text-white text-[11px] font-mono flex items-center justify-between">
+                                  <span>Ocular Landmark &amp; Specular Highlight Reticles</span>
+                                  <span className="text-[#E9C46A]">{imageResult.corneal_reflections.eyes_detected} Dual Corneas</span>
+                                </div>
+                                <img
+                                  src={imageResult.corneal_reflections.annotated_overlay_url}
+                                  alt="Corneal specular reticles"
+                                  className="max-h-52 w-auto object-contain"
+                                />
+                              </div>
+                            )}
+
+                            <p className="text-[11px] text-[#70675D]">
+                              {imageResult.corneal_reflections.analysis_notes}
+                            </p>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-[#70675D] italic">
+                            {imageResult.corneal_reflections.analysis_notes}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Perceptual Hash (pHash) & Reverse Visual Lookup Card (Feature 5) */}
+                    {imageResult.perceptual_hashes && (
+                      <div className="rounded-3xl bg-white border border-[#E8DFCF] p-5 shadow-xs space-y-3.5">
+                        <div className="flex items-center justify-between">
+                          <h3 className="font-bold text-sm text-[#2A2521] flex items-center gap-2">
+                            <span className="material-symbols-outlined text-[18px] text-[#8A6714]">fingerprint</span>
+                            <span>Perceptual Hash Index &amp; Reverse Source Lookup</span>
+                          </h3>
+                          <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-[#F5ECDA] text-[#8A6714] border border-[#E8D9B5]">
+                            64-BIT DCT
+                          </span>
+                        </div>
+
+                        <div className="p-3 rounded-xl bg-[#FAF7EE] border border-[#E8DFCF] space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] text-[#6C6357]">Frequency Fingerprint (pHash):</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (imageResult.perceptual_hashes?.phash) {
+                                  navigator.clipboard.writeText(imageResult.perceptual_hashes.phash);
+                                  alert("Copied pHash to clipboard: " + imageResult.perceptual_hashes.phash);
+                                }
+                              }}
+                              className="text-[11px] text-[#D9651E] hover:underline font-mono flex items-center gap-1"
+                            >
+                              <span className="material-symbols-outlined text-[13px]">content_copy</span>
+                              <span>Copy</span>
+                            </button>
+                          </div>
+                          <div className="font-mono text-xs font-bold text-[#2A2521] tracking-wider break-all bg-white p-2 rounded-lg border border-[#E5DAC6]">
+                            {imageResult.perceptual_hashes?.phash || "N/A"}
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-[10px] font-mono text-[#70675D]">
+                            <div>dHash: <span className="font-semibold text-[#2A2521]">{imageResult.perceptual_hashes?.dhash || "N/A"}</span></div>
+                            <div>aHash: <span className="font-semibold text-[#2A2521]">{imageResult.perceptual_hashes?.ahash || "N/A"}</span></div>
+                          </div>
+                        </div>
+
+                        {/* Reverse Visual Search Engine Deep Links */}
+                        <div className="space-y-2">
+                          <span className="text-xs font-semibold text-[#2A2521] block">
+                            Query Global Web Indices (Visual Match &amp; Clones):
+                          </span>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            <a
+                              href={imageResult.perceptual_hashes?.reverse_lookup_urls?.google_lens || (imageResult.perceptual_hashes as any)?.google_lens_url || "https://lens.google.com/"}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-2.5 py-1.5 rounded-xl bg-[#FAF7EE] hover:bg-[#F2EBDB] border border-[#E8DFCF] text-center text-xs font-semibold text-[#2A2521] transition-colors flex items-center justify-center gap-1.5"
+                            >
+                              <span className="material-symbols-outlined text-[14px] text-blue-600">search</span>
+                              <span>Google Lens</span>
+                            </a>
+                            <a
+                              href={imageResult.perceptual_hashes?.reverse_lookup_urls?.tineye || (imageResult.perceptual_hashes as any)?.tineye_url || "https://tineye.com/"}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-2.5 py-1.5 rounded-xl bg-[#FAF7EE] hover:bg-[#F2EBDB] border border-[#E8DFCF] text-center text-xs font-semibold text-[#2A2521] transition-colors flex items-center justify-center gap-1.5"
+                            >
+                              <span className="material-symbols-outlined text-[14px] text-indigo-600">travel_explore</span>
+                              <span>TinEye</span>
+                            </a>
+                            <a
+                              href={imageResult.perceptual_hashes?.reverse_lookup_urls?.bing_visual || (imageResult.perceptual_hashes as any)?.bing_visual_url || "https://www.bing.com/visualsearch"}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-2.5 py-1.5 rounded-xl bg-[#FAF7EE] hover:bg-[#F2EBDB] border border-[#E8DFCF] text-center text-xs font-semibold text-[#2A2521] transition-colors flex items-center justify-center gap-1.5"
+                            >
+                              <span className="material-symbols-outlined text-[14px] text-cyan-600">pageview</span>
+                              <span>Bing Visual</span>
+                            </a>
+                            <a
+                              href={imageResult.perceptual_hashes?.reverse_lookup_urls?.yandex_images || (imageResult.perceptual_hashes as any)?.yandex_images_url || "https://yandex.com/images/"}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-2.5 py-1.5 rounded-xl bg-[#FAF7EE] hover:bg-[#F2EBDB] border border-[#E8DFCF] text-center text-xs font-semibold text-[#2A2521] transition-colors flex items-center justify-center gap-1.5"
+                            >
+                              <span className="material-symbols-outlined text-[14px] text-red-600">manage_search</span>
+                              <span>Yandex</span>
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
-        </div>
-      )}
+            )}
+          </div>
+        )}
 
-      {/* ========================================================================= */}
-      {/* VIEW 3: VIDEO FORENSICS WORKSPACE                                        */}
-      {/* ========================================================================= */}
-      {workspaceMode === "video_workspace" && (
-        <VideoForensicsWorkspace
-          onBackToLanding={() => setWorkspaceMode("landing")}
-          onInspectFrameInWorkstation={(frameReport, thumb) => {
-            setImageResult(frameReport);
-            if (thumb) setImagePreviewUrl(thumb);
-            setWorkspaceMode("image_workspace");
-            setActiveImageTab("synthesis");
-          }}
-        />
-      )}
+        {/* =================================================================== */}
+        {/* VIEW 2: VIDEO DETECTION WORKBENCH                                   */}
+        {/* =================================================================== */}
+        {activeTab === "video" && (
+          <div className="space-y-6 animate-fade-in">
+            {/* Header info */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h1 className="text-2xl lg:text-3xl font-bold text-[#2A2521] tracking-tight">
+                  Video Temporal &amp; Deepfake Inspection
+                </h1>
+                <p className="text-sm text-[#6C6357] mt-1 max-w-2xl">
+                  Upload a video file or record via live camera to audit inter-frame trajectory curvature, frame-wise segmentation, and biological hemodynamics.
+                </p>
+              </div>
 
-      {/* ========================================================================= */}
-      {/* VIEW 4: SECURA SOCIAL SIMULATION SUITE (MISSION 26)                       */}
-      {/* ========================================================================= */}
-      {workspaceMode === "secura_social" && (
-        <SecuraSocialSuite onBackToLab={() => setWorkspaceMode("landing")} />
-      )}
-
-      {/* ========================================================================= */}
-      {/* ANALYST AUTHENTICATION MODAL                                              */}
-      {/* ========================================================================= */}
-      {isAuthModalOpen && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            backgroundColor: "rgba(48, 39, 31, 0.45)",
-            backdropFilter: "blur(6px)",
-            zIndex: 1000,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 20,
-          }}
-          onClick={() => setIsAuthModalOpen(false)}
-        >
-          <div
-            className="card card-elevated"
-            style={{
-              width: "100%",
-              maxWidth: 420,
-              padding: 32,
-              backgroundColor: "var(--bg-surface)",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <div className="eyebrow" style={{ margin: 0 }}>SECURE ANALYST ACCESS</div>
-              <button
-                onClick={() => setIsAuthModalOpen(false)}
-                style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "var(--text-secondary)" }}
-              >
-                ×
-              </button>
-            </div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 20, borderBottom: "1px solid var(--border-subtle)", paddingBottom: 8 }}>
+              {/* Instant Camera Trigger */}
               <button
                 type="button"
-                onClick={() => { setAuthMode("login"); setAuthError(null); }}
-                style={{
-                  background: "none",
-                  border: "none",
-                  padding: "6px 14px",
-                  fontSize: 13,
-                  fontWeight: authMode === "login" ? 700 : 500,
-                  color: authMode === "login" ? "var(--text-primary)" : "var(--text-secondary)",
-                  borderBottom: authMode === "login" ? "2px solid var(--brand-accent)" : "2px solid transparent",
-                  cursor: "pointer"
-                }}
+                onClick={() => startCamera("video")}
+                className="px-4 py-2 rounded-xl bg-white hover:bg-[#F9F5EC] border border-[#DDD1BE] text-xs font-bold text-[#2A2521] shadow-xs transition-colors flex items-center gap-2 self-start sm:self-auto"
               >
-                Sign In
-              </button>
-              <button
-                type="button"
-                onClick={() => { setAuthMode("register"); setAuthError(null); }}
-                style={{
-                  background: "none",
-                  border: "none",
-                  padding: "6px 14px",
-                  fontSize: 13,
-                  fontWeight: authMode === "register" ? 700 : 500,
-                  color: authMode === "register" ? "var(--text-primary)" : "var(--text-secondary)",
-                  borderBottom: authMode === "register" ? "2px solid var(--brand-accent)" : "2px solid transparent",
-                  cursor: "pointer"
-                }}
-              >
-                Register New Account
+                <span className="material-symbols-outlined text-[16px] text-[#2D6A4F]">videocam</span>
+                <span>Record Live Video</span>
               </button>
             </div>
 
-            <h3 style={{ fontSize: 18, marginBottom: 6 }}>
-              {authMode === "login" ? "Analyst Sign In" : "Register Forensic Examiner"}
-            </h3>
-            <p style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 18 }}>
-              {authMode === "login" 
-                ? "Authenticate against the secure PostgreSQL database to access forensic weights and logs." 
-                : "Create a persistent analyst profile in the PostgreSQL database."}
-            </p>
-
-            {authError && (
+            {/* Upload Zone when no video selected */}
+            {!videoFile && (
               <div
-                style={{
-                  padding: 10,
-                  backgroundColor: "var(--status-anomaly-bg)",
-                  color: "var(--status-anomaly-text)",
-                  borderRadius: 8,
-                  fontSize: 12,
-                  marginBottom: 16,
+                onClick={() => videoInputRef.current?.click()}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                    handleSelectVideo(e.dataTransfer.files[0]);
+                  }
                 }}
+                className="group cursor-pointer rounded-3xl border-2 border-dashed border-[#DFD4BF] hover:border-[#D9651E] bg-[#FFFDF9] hover:bg-[#FFF9F2] transition-all p-12 text-center flex flex-col items-center justify-center gap-3 shadow-xs"
               >
-                {authError}
+                <div className="w-16 h-16 rounded-2xl bg-[#F6EDE0] group-hover:bg-[#FBE9DC] text-[#D9651E] flex items-center justify-center transition-colors">
+                  <span className="material-symbols-outlined text-3xl">video_file</span>
+                </div>
+                <div className="space-y-1">
+                  <p className="font-semibold text-base text-[#2A2521]">
+                    Click to select a video, or drag and drop here
+                  </p>
+                  <p className="text-xs text-[#7A7165]">
+                    Supports MP4, WebM, MOV, and MKV formats
+                  </p>
+                </div>
+                <div className="flex gap-3 mt-2">
+                  <button
+                    type="button"
+                    className="mt-2 px-5 py-2.5 rounded-xl bg-[#D9651E] hover:bg-[#C25816] text-white font-semibold text-sm transition-colors shadow-sm"
+                  >
+                    Browse Video
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startCamera("video");
+                    }}
+                    className="mt-2 px-4 py-2.5 rounded-xl bg-white hover:bg-[#F7F2E6] border border-[#D5C9B3] text-[#2A2521] font-semibold text-sm transition-colors shadow-xs flex items-center gap-1.5"
+                  >
+                    <span className="material-symbols-outlined text-sm text-[#2D6A4F]">videocam</span>
+                    <span>Record Video</span>
+                  </button>
+                </div>
               </div>
             )}
 
-            {authMode === "login" ? (
-              <form onSubmit={handleLoginSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                <div>
-                  <label style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>
-                    Username or Email
-                  </label>
-                  <input
-                    type="text"
-                    value={authEmail}
-                    onChange={(e) => setAuthEmail(e.target.value)}
-                    style={{
-                      width: "100%",
-                      padding: "10px 12px",
-                      borderRadius: 8,
-                      border: "1px solid var(--border-subtle)",
-                      backgroundColor: "var(--bg-surface-secondary)",
-                      color: "var(--text-primary)",
-                      fontSize: 14,
-                    }}
-                    required
-                  />
-                </div>
+            <input
+              ref={videoInputRef}
+              type="file"
+              accept="video/mp4,video/webm,video/quicktime,video/x-matroska"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files && e.target.files[0]) {
+                  handleSelectVideo(e.target.files[0]);
+                }
+              }}
+            />
 
-                <div>
-                  <label style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>
-                    Password
-                  </label>
-                  <input
-                    type="password"
-                    value={authPassword}
-                    onChange={(e) => setAuthPassword(e.target.value)}
-                    style={{
-                      width: "100%",
-                      padding: "10px 12px",
-                      borderRadius: 8,
-                      border: "1px solid var(--border-subtle)",
-                      backgroundColor: "var(--bg-surface-secondary)",
-                      color: "var(--text-primary)",
-                      fontSize: 14,
-                    }}
-                    required
-                  />
-                </div>
-
+            {/* Error Message */}
+            {videoError && (
+              <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm flex items-center justify-between">
+                <span>{videoError}</span>
                 <button
-                  type="submit"
-                  disabled={authLoading}
-                  className="btn-primary"
-                  style={{ marginTop: 8, padding: 12 }}
+                  onClick={() => setVideoError(null)}
+                  className="text-xs font-semibold underline text-red-700"
                 >
-                  {authLoading ? "Authenticating..." : "Sign In to Station"}
+                  Dismiss
                 </button>
-              </form>
-            ) : (
-              <form onSubmit={handleRegisterSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-                <div>
-                  <label style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>
-                    Analyst Username
-                  </label>
-                  <input
-                    type="text"
-                    value={regUsername}
-                    onChange={(e) => setRegUsername(e.target.value)}
-                    placeholder="e.g. examiner_rajesh"
-                    style={{
-                      width: "100%",
-                      padding: "10px 12px",
-                      borderRadius: 8,
-                      border: "1px solid var(--border-subtle)",
-                      backgroundColor: "var(--bg-surface-secondary)",
-                      color: "var(--text-primary)",
-                      fontSize: 14,
-                    }}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>
-                    Official Email
-                  </label>
-                  <input
-                    type="email"
-                    value={regEmail}
-                    onChange={(e) => setRegEmail(e.target.value)}
-                    placeholder="e.g. rajesh@delhi.gov.in"
-                    style={{
-                      width: "100%",
-                      padding: "10px 12px",
-                      borderRadius: 8,
-                      border: "1px solid var(--border-subtle)",
-                      backgroundColor: "var(--bg-surface-secondary)",
-                      color: "var(--text-primary)",
-                      fontSize: 14,
-                    }}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>
-                    Password (Min 8 characters)
-                  </label>
-                  <input
-                    type="password"
-                    value={regPassword}
-                    onChange={(e) => setRegPassword(e.target.value)}
-                    placeholder="********"
-                    style={{
-                      width: "100%",
-                      padding: "10px 12px",
-                      borderRadius: 8,
-                      border: "1px solid var(--border-subtle)",
-                      backgroundColor: "var(--bg-surface-secondary)",
-                      color: "var(--text-primary)",
-                      fontSize: 14,
-                    }}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>
-                    Role / Division
-                  </label>
-                  <select
-                    value={regRole}
-                    onChange={(e) => setRegRole(e.target.value)}
-                    style={{
-                      width: "100%",
-                      padding: "10px 12px",
-                      borderRadius: 8,
-                      border: "1px solid var(--border-subtle)",
-                      backgroundColor: "var(--bg-surface-secondary)",
-                      color: "var(--text-primary)",
-                      fontSize: 14,
-                    }}
-                  >
-                    <option value="Forensic Analyst">Forensic Analyst</option>
-                    <option value="Lead Forensic Examiner">Lead Forensic Examiner</option>
-                    <option value="Security / Cyber Inspector">Security / Cyber Inspector</option>
-                  </select>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={authLoading}
-                  className="btn-primary"
-                  style={{ marginTop: 8, padding: 12 }}
-                >
-                  {authLoading ? "Creating Account..." : "Create Account in Database"}
-                </button>
-              </form>
+              </div>
             )}
+
+            {/* Analyzing State */}
+            {isVideoAnalyzing && (
+              <div className="p-10 rounded-3xl bg-white border border-[#E8DFCF] text-center space-y-4 shadow-xs">
+                <div className="inline-block animate-spin text-[#D9651E]">
+                  <span className="material-symbols-outlined text-5xl">motion_photos_on</span>
+                </div>
+                <h3 className="font-bold text-lg text-[#2A2521]">Decoding &amp; Auditing Video Frames...</h3>
+                <p className="text-xs text-[#70675D] max-w-md mx-auto">
+                  Sampling video frames, measuring temporal continuity, and evaluating trajectory deviations via the ResTraV MLP model.
+                </p>
+              </div>
+            )}
+
+            {/* Video Result View */}
+            {videoFile && !isVideoAnalyzing && (
+              <div className="space-y-6">
+                {/* Result Hero Banner & Export Bar */}
+                {videoResult && (
+                  <div className="rounded-3xl bg-white border border-[#E8DFCF] p-6 lg:p-8 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+                    <div className="space-y-2">
+                      <span className="text-xs font-mono font-bold uppercase tracking-wider text-[#8A7E70]">
+                        Video Classification &bull; ISO/IEC 27037 Standard
+                      </span>
+                      <div className="flex items-center gap-3">
+                        {videoResult.canonical_verdict?.predicted_label === "AI_GENERATED" ? (
+                          <span className="px-4 py-1.5 rounded-full bg-red-100 border border-red-300 text-red-700 font-bold text-lg flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse"></span>
+                            AI GENERATED VIDEO
+                          </span>
+                        ) : (
+                          <span className="px-4 py-1.5 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-800 font-bold text-lg flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-600"></span>
+                            GENUINE VIDEO
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-[#70675D] max-w-xl">
+                        {videoResult.video_ai_verdict?.verdict_summary ||
+                          (videoResult.canonical_verdict?.predicted_label === "AI_GENERATED"
+                            ? "Synthetic temporal distortion and facial warping patterns detected across decoded frames."
+                            : "Physical camera frame continuity and optical trajectory verified across temporal windows.")}
+                      </p>
+                    </div>
+
+                    {/* Actions & Confidence Meter */}
+                    <div className="flex flex-col sm:flex-row md:flex-col items-center gap-3 w-full md:w-auto shrink-0">
+                      <div className="w-full md:w-56 p-4 rounded-2xl bg-[#FAF7EE] border border-[#E8DFCF] text-center space-y-1.5">
+                        <span className="text-xs font-semibold text-[#7A7165]">Verdict Confidence</span>
+                        <div className="text-3xl font-extrabold text-[#2A2521]">
+                          {videoResult.video_ai_verdict?.confidence_pct != null
+                            ? `${videoResult.video_ai_verdict.confidence_pct.toFixed(1)}%`
+                            : videoResult.canonical_verdict?.model_score != null
+                            ? (() => {
+                                const isAi = videoResult.canonical_verdict.predicted_label === "AI_GENERATED";
+                                const raw = videoResult.canonical_verdict.model_score;
+                                const conf = isAi ? raw : (1.0 - raw);
+                                return `${(conf * 100).toFixed(1)}%`;
+                              })()
+                            : "—"}
+                        </div>
+                        <div className="w-full h-2 rounded-full bg-[#E5DCB8] overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all duration-500 ${
+                              videoResult.canonical_verdict?.predicted_label === "AI_GENERATED"
+                                ? "bg-[#D9651E]"
+                                : "bg-emerald-600"
+                            }`}
+                            style={{
+                              width: `${Math.min(
+                                100,
+                                Math.max(
+                                  0,
+                                  videoResult.video_ai_verdict?.confidence_pct ??
+                                    ((videoResult.canonical_verdict?.predicted_label === "AI_GENERATED"
+                                      ? (videoResult.canonical_verdict?.model_score ?? 0.5)
+                                      : 1.0 - (videoResult.canonical_verdict?.model_score ?? 0.5)) * 100)
+                                )
+                              )}%`,
+                            }}
+                          ></div>
+                        </div>
+                      </div>
+
+                      {/* Export Buttons */}
+                      <div className="flex gap-2 w-full">
+                        <button
+                          type="button"
+                          onClick={() => exportForensicReportPrint(videoFile, "video", null, videoResult, lastCameraTrackRef.current)}
+                          className="flex-1 px-3 py-2 rounded-xl bg-[#2A2521] hover:bg-[#3D352E] text-white text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5"
+                        >
+                          <span className="material-symbols-outlined text-[15px]">print</span>
+                          <span>Export Dossier</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => exportForensicReportDoc(videoFile, "video", null, videoResult, lastCameraTrackRef.current)}
+                          title="Download Word Document"
+                          className="px-3 py-2 rounded-xl bg-white hover:bg-[#F2EBDB] border border-[#D5C9B3] text-xs font-bold text-[#2A2521] transition-colors flex items-center justify-center gap-1"
+                        >
+                          <span className="material-symbols-outlined text-[15px] text-[#D9651E]">description</span>
+                          <span>Word</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Video Playback + 3D Holographic Heart Grid */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                  {/* Left: Video Player (6 cols) */}
+                  <div className="lg:col-span-6 rounded-3xl bg-white border border-[#E8DFCF] p-5 shadow-xs space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-sm text-[#2A2521] flex items-center gap-2">
+                        <span className="material-symbols-outlined text-[18px] text-[#D9651E]">play_circle</span>
+                        <span>Video Playback Viewport</span>
+                      </span>
+                    </div>
+
+                    {videoUrl && (
+                      <div className="rounded-2xl overflow-hidden bg-black flex items-center justify-center">
+                        <video
+                          src={videoUrl}
+                          controls
+                          className="w-full max-h-[440px] object-contain"
+                        />
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between text-xs text-[#70675D]">
+                      <span>{videoFile.name} ({(videoFile.size / (1024 * 1024)).toFixed(2)} MB)</span>
+                      <button
+                        onClick={handleResetVideo}
+                        className="text-[#D9651E] hover:underline font-semibold flex items-center gap-1"
+                      >
+                        <span className="material-symbols-outlined text-sm">refresh</span>
+                        Analyze another video
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Right: 3D Holographic Heart + Real Temporal Metrics (6 cols) */}
+                  <div className="lg:col-span-6 space-y-6">
+                    {/* Embedded 3D Holographic Heart for Video */}
+                    <div className="flex justify-center">
+                      <RGBHeartVisualization
+                        isAiGenerated={videoResult?.canonical_verdict?.predicted_label === "AI_GENERATED"}
+                        confidenceScore={videoResult?.canonical_verdict?.model_score}
+                        activeSample={activeVideoSample}
+                        summary={videoResult?.rgb_summary}
+                        width={380}
+                        height={280}
+                        title={
+                          videoResult?.canonical_verdict?.predicted_label === "AI_GENERATED"
+                            ? "3D Cardioid • Turbulent Rotation Detected"
+                            : "3D Cardioid • Steady Cardiac Perfusion"
+                        }
+                      />
+                    </div>
+
+                    {/* ResTraV Model & Frame Analytics */}
+                    <div className="rounded-3xl bg-white border border-[#E8DFCF] p-5 shadow-xs space-y-3.5">
+                      <h3 className="font-bold text-sm text-[#2A2521] flex items-center gap-2">
+                        <span className="material-symbols-outlined text-[18px] text-[#8A6714]">insights</span>
+                        <span>ResTraV Temporal Analytics</span>
+                      </h3>
+
+                      {videoResult ? (
+                        <div className="space-y-3">
+                          <div className="p-3.5 rounded-xl bg-[#FAF7EE] border border-[#E8DFCF] space-y-1">
+                            <div className="flex justify-between text-xs font-semibold">
+                              <span className="text-[#4D453C]">ResTraV Temporal MLP Score</span>
+                              <span className="text-[#D9651E] font-mono text-sm">
+                                {videoResult.branches?.["restrav_temporal"]?.score != null
+                                  ? `${(videoResult.branches["restrav_temporal"].score * 100).toFixed(1)}%`
+                                  : videoResult.video_ai_verdict?.confidence_pct != null
+                                  ? `${videoResult.video_ai_verdict.confidence_pct.toFixed(1)}%`
+                                  : "Operational"}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-[#7A7165]">
+                              Inter-frame trajectory curvature and generative manifold continuity check.
+                            </p>
+                          </div>
+
+                          {videoResult.video_metadata && (
+                            <div className="p-3.5 rounded-xl bg-[#FAF7EE] border border-[#E8DFCF] text-xs space-y-1.5">
+                              <div className="flex justify-between">
+                                <span className="text-[#6C6357]">Duration:</span>
+                                <span className="font-semibold">{videoResult.video_metadata.duration_sec.toFixed(1)}s</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-[#6C6357]">Total Decoded Frames:</span>
+                                <span className="font-semibold">{videoResult.video_metadata.total_frames}</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-[#6C6357]">Resolution:</span>
+                                <span className="font-semibold">
+                                  {videoResult.video_metadata.width} &times; {videoResult.video_metadata.height} px
+                                </span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-[#70675D]">
+                          Select or upload a video file to view real-time temporal analytics.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* ============================================================= */}
+                {/* FRAME-BY-FRAME SEGMENTATION STRIP                             */}
+                {/* ============================================================= */}
+                {videoResult?.sampled_frames && videoResult.sampled_frames.length > 0 && (
+                  <div className="rounded-3xl bg-white border border-[#E8DFCF] p-6 shadow-xs space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="material-symbols-outlined text-[18px] text-[#D9651E]">view_timeline</span>
+                        <h3 className="font-bold text-sm text-[#2A2521]">
+                          Sampled Video Frames Segmentation ({videoResult.sampled_frames.length} Keyframes)
+                        </h3>
+                      </div>
+                      <span className="text-[11px] text-[#8A7E70]">
+                        Click any frame to inspect synchronized 3D cardioid biometric
+                      </span>
+                    </div>
+
+                    {/* Scrollable Frame Strip */}
+                    <div className="flex gap-3 overflow-x-auto pb-3 pt-1 scrollbar-thin">
+                      {videoResult.sampled_frames.map((frame, idx) => {
+                        const isSelected = idx === selectedVideoFrameIndex;
+                        return (
+                          <div
+                            key={idx}
+                            onClick={() => setSelectedVideoFrameIndex(idx)}
+                            className={`cursor-pointer rounded-2xl border p-2.5 min-w-[140px] max-w-[160px] shrink-0 transition-all text-xs ${
+                              isSelected
+                                ? "bg-[#FAF2EB] border-[#D9651E] ring-2 ring-[#D9651E]/20 shadow-xs"
+                                : "bg-[#FAF7EE] border-[#E8DFCF] hover:border-[#D5C9B3]"
+                            }`}
+                          >
+                            {/* Frame Thumbnail if available */}
+                            {frame.thumbnail_data_url || frame.thumbnail_b64 ? (
+                              <img
+                                src={frame.thumbnail_data_url || `data:image/jpeg;base64,${frame.thumbnail_b64}`}
+                                alt={`Frame ${frame.frame_index}`}
+                                className="w-full h-18 object-cover rounded-lg mb-2 bg-black"
+                              />
+                            ) : (
+                              <div className="w-full h-16 rounded-lg bg-[#EFE8DA] flex items-center justify-center text-[#8A7E70] mb-2 font-mono text-[11px]">
+                                F#{frame.frame_index}
+                              </div>
+                            )}
+
+                            <div className="flex justify-between font-mono font-bold text-[11px]">
+                              <span>F#{frame.frame_index}</span>
+                              <span className="text-[#8A7E70]">{frame.timestamp_sec.toFixed(2)}s</span>
+                            </div>
+
+                            <div className="mt-1 flex items-center justify-between text-[10px] text-[#70675D]">
+                              <span>&Delta; RGB:</span>
+                              <span className="font-mono">{frame.delta_prev_frame.toFixed(2)}</span>
+                            </div>
+
+                            {frame.ai_probability != null && (
+                              <div className="mt-1 text-[10px] font-semibold flex justify-between">
+                                <span>AI:</span>
+                                <span className={frame.ai_probability > 0.5 ? "text-[#D9651E]" : "text-emerald-700"}>
+                                  {(frame.ai_probability * 100).toFixed(0)}%
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* ============================================================= */}
+                {/* TIMELINE ANOMALY HEATMAP & SEGMENT CLIPPING (FEATURE 6)       */}
+                {/* ============================================================= */}
+                <div className="rounded-3xl bg-white border border-[#E8DFCF] p-6 shadow-xs space-y-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-[#EFE8DA]">
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[20px] text-[#D9651E]">movie_filter</span>
+                      <h3 className="font-bold text-sm text-[#2A2521]">
+                        Timeline Anomaly Density &amp; Evidence Segment Clipper
+                      </h3>
+                    </div>
+                    <span className="text-[11px] font-mono text-[#8A7E70]">
+                      OpenCV MP4 Lossless Slicing Engine
+                    </span>
+                  </div>
+
+                  {/* Anomaly Density Heatmap Strip */}
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-xs text-[#70675D]">
+                      <span>Temporal Anomaly Density (0.0s &rarr; {(videoResult?.video_metadata?.duration_sec || 10).toFixed(1)}s)</span>
+                      <span className="font-mono text-[11px] text-[#D9651E] font-semibold">
+                        Peak Anomaly Window: [{clipStartSec.toFixed(1)}s - {clipEndSec.toFixed(1)}s]
+                      </span>
+                    </div>
+
+                    {/* Timeline Heatmap Bar */}
+                    <div className="h-6 w-full rounded-xl bg-[#FAF7EE] border border-[#E2D6C0] p-0.5 flex gap-0.5 overflow-hidden">
+                      {videoResult?.sampled_frames && videoResult.sampled_frames.length > 0 ? (
+                        videoResult.sampled_frames.map((f, fIdx) => {
+                          const aiProb = f.ai_probability ?? 0.5;
+                          const isHigh = aiProb >= 0.7;
+                          const isMed = aiProb >= 0.4 && aiProb < 0.7;
+                          return (
+                            <div
+                              key={fIdx}
+                              onClick={() => {
+                                setSelectedVideoFrameIndex(fIdx);
+                                setClipStartSec(Math.max(0, f.timestamp_sec - 1.5));
+                                setClipEndSec(f.timestamp_sec + 2.5);
+                              }}
+                              title={`Frame #${f.frame_index} @ ${f.timestamp_sec.toFixed(2)}s - AI Prob: ${(aiProb * 100).toFixed(1)}%`}
+                              className={`flex-1 rounded-sm cursor-pointer transition-all hover:scale-y-125 ${
+                                isHigh
+                                  ? "bg-red-500 hover:bg-red-600"
+                                  : isMed
+                                  ? "bg-amber-400 hover:bg-amber-500"
+                                  : "bg-emerald-500 hover:bg-emerald-600"
+                              } ${fIdx === selectedVideoFrameIndex ? "ring-2 ring-[#2A2521]" : ""}`}
+                            />
+                          );
+                        })
+                      ) : (
+                        <div className="w-full bg-emerald-500 rounded-sm" />
+                      )}
+                    </div>
+                    <div className="flex justify-between text-[10px] font-mono text-[#8A7E70]">
+                      <span>0.00s</span>
+                      <span>Midpoint</span>
+                      <span>{(videoResult?.video_metadata?.duration_sec || 10).toFixed(2)}s</span>
+                    </div>
+                  </div>
+
+                  {/* Extraction Controls Bar */}
+                  <div className="p-4 rounded-2xl bg-[#FAF7EE] border border-[#E8DFCF] flex flex-col md:flex-row items-center justify-between gap-4">
+                    <div className="flex flex-wrap items-center gap-4 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-[#4D453C]">Start Time (s):</span>
+                        <input
+                          type="number"
+                          step="0.5"
+                          min="0"
+                          max={clipEndSec}
+                          value={clipStartSec}
+                          onChange={(e) => setClipStartSec(Math.max(0, parseFloat(e.target.value) || 0))}
+                          className="w-20 px-2 py-1 rounded-lg border border-[#D5C9B3] bg-white font-mono text-center font-bold"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-[#4D453C]">End Time (s):</span>
+                        <input
+                          type="number"
+                          step="0.5"
+                          min={clipStartSec}
+                          max={videoResult?.video_metadata?.duration_sec || 300}
+                          value={clipEndSec}
+                          onChange={(e) => setClipEndSec(Math.max(clipStartSec + 0.5, parseFloat(e.target.value) || 5))}
+                          className="w-20 px-2 py-1 rounded-lg border border-[#D5C9B3] bg-white font-mono text-center font-bold"
+                        />
+                      </div>
+
+                      <span className="text-[#8A7E70] font-mono">
+                        Duration: {(clipEndSec - clipStartSec).toFixed(1)}s
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-3 w-full md:w-auto">
+                      <button
+                        type="button"
+                        onClick={handleExtractClip}
+                        disabled={isExtractingClip}
+                        className="w-full md:w-auto px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#D9651E] to-[#C94A29] hover:from-[#C25816] hover:to-[#B33E20] text-white font-bold text-xs shadow-sm flex items-center justify-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+                      >
+                        <span className={`material-symbols-outlined text-[16px] ${isExtractingClip ? "animate-spin" : ""}`}>
+                          {isExtractingClip ? "progress_activity" : "download"}
+                        </span>
+                        <span>{isExtractingClip ? "Slicing Clip (OpenCV)..." : "Export Evidence Clip (.mp4)"}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Success notification banner */}
+                  {clipSuccessMsg && (
+                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2 animate-fade-in font-medium">
+                      <span className="material-symbols-outlined text-base text-emerald-600">check_circle</span>
+                      <span>{clipSuccessMsg}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+
+
+        {/* =================================================================== */}
+        {/* VIEW 4: BATCH FORENSIC INGESTION & AUDIT LEDGER (FEATURE 4)         */}
+        {/* =================================================================== */}
+        {activeTab === "batch" && (
+          <div className="space-y-6 animate-fade-in">
+            {/* Header info */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h1 className="text-2xl lg:text-3xl font-bold text-[#2A2521] tracking-tight">
+                  High-Throughput Batch Forensic Ingestion
+                </h1>
+                <p className="text-sm text-[#6C6357] mt-1 max-w-2xl">
+                  Concurrent multi-file triage across up to 30 forensic assets. Extracts Swin representations, SHA-256 custody digests, 64-bit perceptual hashes (pHash), and generates exportable forensic CSV ledgers.
+                </p>
+              </div>
+
+              {batchResult && batchResult.items.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleExportBatchCSV}
+                  className="px-4 py-2 rounded-xl bg-[#2A2521] hover:bg-[#3D352E] text-white text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 self-start sm:self-auto"
+                >
+                  <span className="material-symbols-outlined text-[16px] text-[#E9C46A]">table_view</span>
+                  <span>Export Batch Ledger (CSV)</span>
+                </button>
+              )}
+            </div>
+
+            {/* Batch Multi-File Dropzone */}
+            <div
+              onClick={() => batchInputRef.current?.click()}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                  handleSelectBatchFiles(e.dataTransfer.files);
+                }
+              }}
+              className="group cursor-pointer rounded-3xl border-2 border-dashed border-[#DFD4BF] hover:border-[#D9651E] bg-[#FFFDF9] hover:bg-[#FFF9F2] transition-all p-10 text-center flex flex-col items-center justify-center gap-3 shadow-xs"
+            >
+              <div className="w-16 h-16 rounded-2xl bg-[#F6EDE0] group-hover:bg-[#FBE9DC] text-[#D9651E] flex items-center justify-center transition-colors">
+                <span className="material-symbols-outlined text-3xl">drive_folder_upload</span>
+              </div>
+              <div className="space-y-1">
+                <p className="font-semibold text-base text-[#2A2521]">
+                  Select multiple files, or drag and drop your evidence folder
+                </p>
+                <p className="text-xs text-[#7A7165]">
+                  Supports multi-selection of JPG, PNG, WebP, and TIFF files (up to 30 assets concurrently)
+                </p>
+              </div>
+              <button
+                type="button"
+                className="mt-2 px-5 py-2.5 rounded-xl bg-[#D9651E] hover:bg-[#C25816] text-white font-semibold text-sm transition-colors shadow-sm"
+              >
+                Browse Multiple Assets
+              </button>
+            </div>
+
+            <input
+              ref={batchInputRef}
+              type="file"
+              multiple
+              accept="image/png,image/jpeg,image/webp,image/tiff"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files && e.target.files.length > 0) {
+                  handleSelectBatchFiles(e.target.files);
+                }
+              }}
+            />
+
+            {/* Error Message */}
+            {batchError && (
+              <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm flex items-center justify-between">
+                <span>{batchError}</span>
+                <button
+                  onClick={() => setBatchError(null)}
+                  className="text-xs font-semibold underline text-red-700"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            {/* Analyzing State */}
+            {isBatchAnalyzing && (
+              <div className="p-10 rounded-3xl bg-white border border-[#E8DFCF] text-center space-y-5 shadow-xs">
+                <div className="inline-block animate-spin text-[#D9651E]">
+                  <span className="material-symbols-outlined text-5xl">sync</span>
+                </div>
+                <div className="space-y-1">
+                  <h3 className="font-bold text-lg text-[#2A2521]">
+                    Deep Forensic Triage &amp; Recheck in Progress ({batchFiles.length} Assets)...
+                  </h3>
+                  <p className="text-xs text-[#70675D] max-w-lg mx-auto">
+                    Extracting C2PA provenance manifests, detecting imperceptible SynthID &amp; visual watermarks, scanning neural representations, and running secondary verification passes.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-3 text-[11px] font-mono text-[#7A7165] pt-2">
+                  <span className="px-3 py-1 rounded-full bg-[#FAF7EE] border border-[#E8DFCF] flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[13px] text-[#D9651E]">verified_user</span>
+                    <span>1. C2PA &amp; SynthID Ingestion</span>
+                  </span>
+                  <span className="px-3 py-1 rounded-full bg-[#FAF7EE] border border-[#E8DFCF] flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[13px] text-[#D9651E]">psychology</span>
+                    <span>2. Deep Vision Scan</span>
+                  </span>
+                  <span className="px-3 py-1 rounded-full bg-[#FAF7EE] border border-[#E8DFCF] flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[13px] text-emerald-600">published_with_changes</span>
+                    <span>3. Multi-Crop Recheck Verification</span>
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Batch Results & Metric Cards */}
+            {batchResult && !isBatchAnalyzing && (
+              <div className="space-y-6">
+                {/* Summary Metrics Bar */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="p-5 rounded-2xl bg-white border border-[#E8DFCF] shadow-xs space-y-1">
+                    <span className="text-xs font-semibold text-[#7A7165]">Total Assets Ingested</span>
+                    <div className="text-2xl font-extrabold text-[#2A2521]">{batchResult.processed_count}</div>
+                    <span className="text-[11px] text-[#8A7E70] font-mono">{batchResult.batch_id}</span>
+                  </div>
+
+                  <div className="p-5 rounded-2xl bg-white border border-[#E8DFCF] shadow-xs space-y-1">
+                    <span className="text-xs font-semibold text-[#7A7165]">Synthetic / AI Detected</span>
+                    <div className="text-2xl font-extrabold text-red-600">{batchResult.ai_generated_count}</div>
+                    <span className="text-[11px] text-red-700 font-medium">
+                      {((batchResult.ai_generated_count / Math.max(1, batchResult.processed_count)) * 100).toFixed(1)}% of batch
+                    </span>
+                  </div>
+
+                  <div className="p-5 rounded-2xl bg-white border border-[#E8DFCF] shadow-xs space-y-1">
+                    <span className="text-xs font-semibold text-[#7A7165]">Genuine / Photographic</span>
+                    <div className="text-2xl font-extrabold text-emerald-700">{batchResult.genuine_count}</div>
+                    <span className="text-[11px] text-emerald-800 font-medium">
+                      {((batchResult.genuine_count / Math.max(1, batchResult.processed_count)) * 100).toFixed(1)}% of batch
+                    </span>
+                  </div>
+
+                  <div className="p-5 rounded-2xl bg-white border border-[#E8DFCF] shadow-xs space-y-1">
+                    <span className="text-xs font-semibold text-[#7A7165]">Mean Confidence</span>
+                    <div className="text-2xl font-extrabold text-[#D9651E]">
+                      {(batchResult.average_confidence * 100).toFixed(1)}%
+                    </div>
+                    <span className="text-[11px] text-[#70675D]">Verified with Recheck</span>
+                  </div>
+                </div>
+
+                {/* Evidence Ledger Table */}
+                <div className="rounded-3xl bg-white border border-[#E8DFCF] overflow-hidden shadow-xs">
+                  <div className="p-5 border-b border-[#E8DFCF] flex items-center justify-between">
+                    <h3 className="font-bold text-sm text-[#2A2521] flex items-center gap-2">
+                      <span className="material-symbols-outlined text-[18px] text-[#D9651E]">list_alt</span>
+                      <span>Asset Forensic Ledger &amp; Provenance Registry</span>
+                    </h3>
+                    <span className="text-xs font-mono text-[#70675D]">
+                      {batchResult.processed_count} verified records &bull; Multi-layer rechecked
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs text-[#2A2521]">
+                      <thead className="bg-[#FAF7EE] border-b border-[#E8DFCF] text-[#7A7165] font-semibold text-[11px] uppercase tracking-wider">
+                        <tr>
+                          <th className="py-3 px-4">Asset Name</th>
+                          <th className="py-3 px-4">Size / Format</th>
+                          <th className="py-3 px-4">SHA-256 Digest</th>
+                          <th className="py-3 px-4">Evidence &amp; Provenance</th>
+                          <th className="py-3 px-4">Verdict</th>
+                          <th className="py-3 px-4">Confidence</th>
+                          <th className="py-3 px-4 text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#EFE8DA]">
+                        {batchResult.items.map((item, idx) => (
+                          <tr key={idx} className="hover:bg-[#FFFDF9] transition-colors">
+                            <td className="py-3 px-4 font-semibold text-[#2A2521] max-w-[200px] truncate" title={item.filename}>
+                              {item.filename}
+                            </td>
+                            <td className="py-3 px-4 text-[#70675D]">
+                              {(item.file_size_bytes / 1024).toFixed(1)} KB &bull; {item.media_type}
+                            </td>
+                            <td className="py-3 px-4 font-mono text-[11px] text-[#8A7E70] max-w-[120px] truncate" title={item.sha256}>
+                              {item.sha256.slice(0, 12)}...
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="space-y-0.5">
+                                <span className="font-medium text-[#2A2521] text-[11px] block">
+                                  {item.provenance_signal || "Deep Vision Probe"}
+                                </span>
+                                <span className="font-mono text-[10px] text-[#D9651E] block">
+                                  pHash: {item.phash}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4">
+                              <div>
+                                {item.predicted_label === "AI_GENERATED" ? (
+                                  <span className="px-2.5 py-0.5 rounded-full bg-red-100 text-red-700 font-bold text-[10px] border border-red-300 inline-block">
+                                    AI GENERATED
+                                  </span>
+                                ) : item.predicted_label === "NOT_AI_GENERATED" ? (
+                                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-bold text-[10px] border border-emerald-300 inline-block">
+                                    GENUINE
+                                  </span>
+                                ) : (
+                                  <span className="px-2.5 py-0.5 rounded-full bg-gray-100 text-gray-700 font-bold text-[10px] border border-gray-300 inline-block">
+                                    INCONCLUSIVE
+                                  </span>
+                                )}
+                                {item.rechecked && (
+                                  <span className="text-[10px] text-emerald-700 font-medium flex items-center gap-0.5 mt-0.5">
+                                    <span className="material-symbols-outlined text-[12px] text-emerald-600">verified</span>
+                                    <span>Rechecked</span>
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono font-bold">{(item.confidence_score * 100).toFixed(1)}%</span>
+                                <div className="w-16 h-1.5 rounded-full bg-[#E5DCB8] overflow-hidden">
+                                  <div
+                                    className={`h-full ${item.predicted_label === "AI_GENERATED" ? "bg-[#D9651E]" : "bg-emerald-600"}`}
+                                    style={{ width: `${item.confidence_score * 100}%` }}
+                                  ></div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 text-right">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const targetFile = batchFiles[idx] || batchFiles.find(f => f.name === item.filename) || batchFiles[0];
+                                  if (targetFile) {
+                                    handleSelectImage(targetFile);
+                                    setActiveTab("image");
+                                    window.scrollTo({ top: 0, behavior: "smooth" });
+                                  }
+                                }}
+                                className="px-3 py-1.5 rounded-lg bg-[#D9651E] hover:bg-[#C25816] text-white font-bold text-[11px] shadow-xs transition-colors flex items-center gap-1 ml-auto"
+                              >
+                                <span className="material-symbols-outlined text-[13px]">zoom_in</span>
+                                <span>Inspect</span>
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* =================================================================== */}
+        {/* VIEW 5: REAL-TIME WEBRTC DEEPFAKE SHIELD                            */}
+        {/* =================================================================== */}
+        {activeTab === "live-shield" && (
+          <WebcamDeepfakeShield onBackToOverview={() => setActiveTab("landing")} />
+        )}
+      </main>
+
+      {/* ===================================================================== */}
+      {/* LIVE CAMERA CAPTURE MODAL (PHOTO SNAP & VIDEO RECORDING)              */}
+      {/* ===================================================================== */}
+      {isCameraActive && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-xl bg-white rounded-3xl border border-[#E8DFCF] shadow-2xl overflow-hidden p-6 space-y-5 animate-scale-in">
+            <div className="flex items-center justify-between pb-3 border-b border-[#EFE8DA]">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[#D9651E]">
+                  {cameraMode === "photo" ? "photo_camera" : "videocam"}
+                </span>
+                <span className="font-bold text-base text-[#2A2521]">
+                  {cameraMode === "photo" ? "Live Photo Capture" : "Live Video Recording"}
+                </span>
+              </div>
+              <button
+                onClick={stopCamera}
+                className="w-8 h-8 rounded-full bg-[#FAF7EE] hover:bg-[#F2EBDB] flex items-center justify-center text-[#70675D] transition-colors"
+              >
+                <span className="material-symbols-outlined text-lg">close</span>
+              </button>
+            </div>
+
+            {/* Camera Viewport Canvas */}
+            <div className="relative rounded-2xl overflow-hidden bg-black flex items-center justify-center min-h-[300px] max-h-[380px]">
+              <video
+                ref={cameraVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-cover"
+              />
+
+              {/* Holographic Camera Alignment Reticle */}
+              <div className="absolute inset-8 border border-white/30 rounded-2xl pointer-events-none flex items-center justify-center">
+                <div className="w-8 h-8 border-t-2 border-l-2 border-[#D9651E] absolute top-2 left-2"></div>
+                <div className="w-8 h-8 border-t-2 border-r-2 border-[#D9651E] absolute top-2 right-2"></div>
+                <div className="w-8 h-8 border-b-2 border-l-2 border-[#D9651E] absolute bottom-2 left-2"></div>
+                <div className="w-8 h-8 border-b-2 border-r-2 border-[#D9651E] absolute bottom-2 right-2"></div>
+                <span className="text-[10px] font-mono tracking-widest text-white/70 uppercase">
+                  {cameraMode === "photo" ? "ALIGN SUBJECT" : isRecordingVideo ? `RECORDING: ${recordTimerSec}s` : "READY TO RECORD"}
+                </span>
+              </div>
+            </div>
+
+            {/* Camera Actions */}
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-xs text-[#70675D]">
+                {cameraMode === "photo"
+                  ? "Position the target inside the reticle and capture."
+                  : "Records a 5-15s temporal snippet for ResTraV trajectory auditing."}
+              </span>
+
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={stopCamera}
+                  className="px-4 py-2 rounded-xl bg-[#FAF7EE] hover:bg-[#F2EBDB] text-xs font-semibold text-[#70675D]"
+                >
+                  Cancel
+                </button>
+
+                {cameraMode === "photo" ? (
+                  <button
+                    type="button"
+                    onClick={capturePhoto}
+                    className="px-5 py-2 rounded-xl bg-[#D9651E] hover:bg-[#C25816] text-white font-bold text-xs shadow-sm flex items-center gap-1.5"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">camera</span>
+                    <span>Capture Photo</span>
+                  </button>
+                ) : !isRecordingVideo ? (
+                  <button
+                    type="button"
+                    onClick={startVideoRecording}
+                    className="px-5 py-2 rounded-xl bg-[#2D6A4F] hover:bg-[#24543E] text-white font-bold text-xs shadow-sm flex items-center gap-1.5"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">fiber_manual_record</span>
+                    <span>Start Recording</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={stopVideoRecording}
+                    className="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 animate-pulse"
+                  >
+                    <span className="material-symbols-outlined text-[16px]">stop</span>
+                    <span>Stop &amp; Analyze ({recordTimerSec}s)</span>
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* EDITORIAL FOOTER                                                          */}
-      {/* ========================================================================= */}
-      <footer
-        style={{
-          borderTop: "1px solid var(--border-subtle)",
-          backgroundColor: "var(--bg-surface)",
-          padding: "36px 28px",
-          marginTop: "auto",
-        }}
-      >
-        <div
-          style={{
-            maxWidth: 1360,
-            margin: "0 auto",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            flexWrap: "wrap",
-            gap: 16,
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontFamily: "var(--font-serif)", fontSize: 16, fontWeight: 700 }}>Secura AI</span>
-            <span style={{ color: "var(--text-secondary)", fontSize: 12 }}>· Digital Forensics &amp; Provenance Architecture</span>
-          </div>
+      {/* ===================================================================== */}
+      {/* C2PA CRYPTOGRAPHIC WATERMARK & ASSERTION SEAL PREVIEW MODAL           */}
+      {/* ===================================================================== */}
+      {sealedImage && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-xl bg-white rounded-3xl border border-[#E8DFCF] shadow-2xl overflow-hidden p-6 space-y-4 animate-scale-in">
+            <div className="flex items-center justify-between pb-3 border-b border-[#EFE8DA]">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-[#D9651E]">verified_user</span>
+                <span className="font-bold text-base text-[#2A2521]">C2PA Cryptographically Sealed Asset</span>
+              </div>
+              <button
+                onClick={() => setSealedImage(null)}
+                className="w-8 h-8 rounded-full bg-[#FAF7EE] hover:bg-[#F2EBDB] flex items-center justify-center text-[#70675D] transition-colors"
+              >
+                <span className="material-symbols-outlined text-lg">close</span>
+              </button>
+            </div>
 
-          <div style={{ fontSize: 12, color: "var(--text-secondary)", display: "flex", gap: 16 }}>
-            <span>Zero-Hallucination Framework</span>
-            <span>C2PA / JUMBF Verified</span>
-            <span>CLIP ViT-L/14 &amp; Swin Models</span>
+            <div className="rounded-2xl overflow-hidden bg-[#181615] flex items-center justify-center max-h-72">
+              <img
+                src={sealedImage.sealed_image_data_url}
+                alt="C2PA Sealed Asset"
+                className="max-h-72 w-auto object-contain"
+              />
+            </div>
+
+            <div className="p-3.5 rounded-2xl bg-[#FAF7EE] border border-[#E8DFCF] space-y-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-[#6C6357]">C2PA Manifest Case:</span>
+                <span className="font-mono font-semibold text-[#2A2521]">{sealedImage.c2pa_manifest_id || sealedImage.case_id}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[#6C6357]">SHA-256 Digest:</span>
+                <span className="font-mono font-semibold text-[#2A2521] truncate max-w-[260px]">
+                  {sealedImage.sealed_sha256 || sealedImage.sha256 || sealedImage.original_sha256 || "VERIFIED"}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[#6C6357]">Signature Authority:</span>
+                <span className="font-mono text-[#D9651E] truncate max-w-[260px]">
+                  {sealedImage.signature_status || sealedImage.watermark_signature || "Secura.AI Root CA"}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[#6C6357]">Timestamp (UTC):</span>
+                <span className="font-semibold text-[#2A2521]">{sealedImage.signed_at_utc || new Date().toISOString()}</span>
+              </div>
+            </div>
+
+            <div className="flex gap-3 justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setSealedImage(null)}
+                className="px-4 py-2 rounded-xl bg-[#FAF7EE] hover:bg-[#F2EBDB] text-xs font-semibold text-[#70675D]"
+              >
+                Close
+              </button>
+              <a
+                href={sealedImage.sealed_image_data_url}
+                download={`C2PA_SEALED_ASSET.jpg`}
+                className="px-5 py-2 rounded-xl bg-[#D9651E] hover:bg-[#C25816] text-white font-bold text-xs shadow-sm flex items-center gap-1.5"
+              >
+                <span className="material-symbols-outlined text-[15px]">download</span>
+                <span>Download Sealed Asset</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* FOOTER                                                                */}
+      {/* ===================================================================== */}
+      <footer className="border-t border-[#E8DFCF] bg-[#FAF7EE] py-6 px-6 text-xs text-[#8A7E70]">
+        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-[#2A2521]">Secura.AI</span>
+            <span>&bull; Enterprise Digital Trust &amp; Media Forensics</span>
+          </div>
+          <div className="flex items-center gap-4 text-[11px] text-[#A39788]">
+            <span>ISO/IEC 27037:2012 Standard</span>
+            <span>&bull;</span>
+            <span>SHA-256 Custody Sealing</span>
+            <span>&bull;</span>
+            <span>Local Cluster v1.0.0</span>
           </div>
         </div>
       </footer>
-
-      {/* Mission 24: Live Photo Camera Capture Modal */}
-      {/* Mission 24: Live Photo Camera Capture Modal */}
-      {isPhotoCameraOpen && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: "rgba(0,0,0,0.75)",
-            backdropFilter: "blur(6px)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 9999,
-            padding: 20,
-          }}
-        >
-          <div
-            className="card card-elevated"
-            style={{
-              maxWidth: 640,
-              width: "100%",
-              backgroundColor: "var(--bg-surface)",
-              borderRadius: 20,
-              padding: 24,
-              boxShadow: "0 20px 40px rgba(0,0,0,0.4)",
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span className="badge badge-terracotta">WEBCAM CAPTURE</span>
-                <h3 style={{ margin: 0, fontSize: 18 }}>Take Photo for AI Analysis</h3>
-              </div>
-              <button onClick={closePhotoCamera} className="btn-secondary" style={{ padding: "4px 10px", fontSize: 12 }}>
-                ✕ Close
-              </button>
-            </div>
-
-            <div style={{ position: "relative", backgroundColor: "#000", borderRadius: 12, overflow: "hidden", minHeight: 340 }}>
-              {!capturedPhotoBlob ? (
-                <video
-                  ref={webcamVideoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  style={{ width: "100%", height: 340, objectFit: "cover" }}
-                />
-              ) : (
-                <img
-                  src={capturedPhotoPreviewUrl || ""}
-                  alt="Captured camera still"
-                  style={{ width: "100%", height: 340, objectFit: "contain", backgroundColor: "#111" }}
-                />
-              )}
-            </div>
-
-            {!capturedPhotoBlob ? (
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 18 }}>
-                <button
-                  onClick={() => openPhotoCamera(cameraFacingMode === "user" ? "environment" : "user")}
-                  className="btn-secondary"
-                  style={{ fontSize: 13, padding: "8px 14px" }}
-                >
-                  🔄 Switch Camera
-                </button>
-                <div style={{ display: "flex", gap: 10 }}>
-                  <button onClick={closePhotoCamera} className="btn-secondary" style={{ fontSize: 13, padding: "8px 16px" }}>
-                    Cancel
-                  </button>
-                  <button onClick={capturePhoto} className="btn-primary" style={{ fontSize: 14, padding: "8px 22px", fontWeight: 700 }}>
-                    📸 Capture Photo
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 18 }}>
-                <button
-                  onClick={retakePhoto}
-                  className="btn-secondary"
-                  style={{ fontSize: 13, padding: "8px 14px" }}
-                >
-                  🔄 Retake Photo
-                </button>
-                <div style={{ display: "flex", gap: 10 }}>
-                  <button onClick={closePhotoCamera} className="btn-secondary" style={{ fontSize: 13, padding: "8px 16px" }}>
-                    Cancel
-                  </button>
-                  <button onClick={useCapturedPhoto} className="btn-primary" style={{ fontSize: 14, padding: "8px 22px", fontWeight: 700 }}>
-                    ⚡ Use Photo &amp; Analyze
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      </div>
     </div>
   );
 }

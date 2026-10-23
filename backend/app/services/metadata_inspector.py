@@ -346,6 +346,28 @@ def _inspect_metadata_internal(
             if isinstance(mw, int) and isinstance(mh, int) and mw > 0 and mh > 0:
                 meta_dims = {"width": mw, "height": mh}
 
+            # Extract hardware manufacturer or AIGC origin from UserComment (tag 37510)
+            user_comment = _safe_str(sub_exif.get(ExifTags.Base.UserComment) or sub_exif.get(37510))
+            if user_comment:
+                uc_lower = user_comment.lower()
+                if "oplus" in uc_lower or "oneplus" in uc_lower:
+                    if not make: make = "OnePlus / Oplus Mobile"
+                    if not model: model = "ColorOS Camera Sensor"
+                elif "apple" in uc_lower or "iphone" in uc_lower:
+                    if not make: make = "Apple"
+                    if not model: model = "iPhone Camera"
+                elif "samsung" in uc_lower:
+                    if not make: make = "Samsung"
+                    if not model: model = "Galaxy Camera"
+                elif "xiaomi" in uc_lower:
+                    if not make: make = "Xiaomi"
+                    if not model: model = "MIUI Camera"
+                elif "google" in uc_lower or "pixel" in uc_lower:
+                    if not make: make = "Google"
+                    if not model: model = "Pixel Camera"
+                elif "dreamina" in uc_lower or "aigc" in uc_lower:
+                    if not software: software = "Dreamina AIGC Engine"
+
     # Fallback to PNG text if software is absent
     if not software and png_text_count > 0 and isinstance(png_text, dict):
         software = _safe_str(png_text.get("Software") or png_text.get("Comment") or png_text.get("Description"))

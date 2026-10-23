@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { RGBFrameSample, RGBSummary } from "../types/api";
 
-interface RGBHeartProps {
+export interface RGBHeartProps {
+  isAiGenerated?: boolean | null;
+  confidenceScore?: number | null;
   activeSample?: RGBFrameSample | null;
   summary?: RGBSummary | null;
   isPlaying?: boolean;
@@ -10,51 +12,57 @@ interface RGBHeartProps {
   showLabels?: boolean;
   interactive?: boolean;
   className?: string;
+  title?: string;
 }
 
 export const RGBHeartVisualization: React.FC<RGBHeartProps> = ({
+  isAiGenerated,
+  confidenceScore,
   activeSample,
   summary,
   isPlaying = false,
-  width = 360,
-  height = 320,
+  width = 380,
+  height = 340,
   showLabels = true,
   interactive = true,
   className = "",
+  title,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const ecgCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const animFrameRef = useRef<number | null>(null);
+
+  // Rotation & levitation state
+  const rotYRef = useRef<number>(0);
+  const rotXRef = useRef<number>(0.22); // subtle tilt for 3D depth
+  const floatOffsetRef = useRef<number>(0);
   const timeRef = useRef<number>(0);
   const ecgHistoryRef = useRef<number[]>([]);
 
-  // Channel toggles for analytical soloing
+  // Analytical channel toggles
   const [showR, setShowR] = useState(true);
   const [showG, setShowG] = useState(true);
   const [showB, setShowB] = useState(true);
 
-  // Check reduced motion preference
-  const prefersReducedMotion = useRef(
-    typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  ).current;
+  // Derive pulse & classification state
+  const rawBpm = activeSample?.heart_rate_bpm ?? summary?.estimated_heart_rate_bpm ?? (isAiGenerated ? 0.0 : 72.0);
+  const isSynthetic = isAiGenerated ?? (activeSample?.ai_probability != null ? activeSample.ai_probability > 0.5 : false);
+  const hasCardiacPulse = !isSynthetic && rawBpm >= 45.0 && rawBpm <= 160.0;
+  const displayBpm = hasCardiacPulse ? rawBpm.toFixed(1) : "0.0";
+  const confidencePercent = confidenceScore != null ? (confidenceScore * 100).toFixed(1) : null;
 
-  // Normalized RGB values in [0, 1] range to avoid off-canvas projection
-  const rVal = activeSample ? (activeSample.r_mean > 1.0 ? activeSample.r_mean / 255.0 : activeSample.r_mean) : 0.58;
-  const gVal = activeSample ? (activeSample.g_mean > 1.0 ? activeSample.g_mean / 255.0 : activeSample.g_mean) : 0.44;
+  // Normalized channel levels
+  const rVal = activeSample ? (activeSample.r_mean > 1.0 ? activeSample.r_mean / 255.0 : activeSample.r_mean) : 0.62;
+  const gVal = activeSample ? (activeSample.g_mean > 1.0 ? activeSample.g_mean / 255.0 : activeSample.g_mean) : 0.46;
   const bVal = activeSample ? (activeSample.b_mean > 1.0 ? activeSample.b_mean / 255.0 : activeSample.b_mean) : 0.38;
 
-  // Raw channel display values (0 to 255 scale)
   const rDisplay = Math.round(rVal * 255);
   const gDisplay = Math.round(gVal * 255);
   const bDisplay = Math.round(bVal * 255);
 
-  const rawBpm = activeSample?.heart_rate_bpm ?? summary?.estimated_heart_rate_bpm ?? 0.0;
-  const hasCardiacPulse = rawBpm >= 45.0 && rawBpm <= 160.0;
-  const displayBpm = hasCardiacPulse ? rawBpm.toFixed(1) : "0.0";
-  const jitter = summary?.spectral_entropy ?? 0.15;
-  const timestampSec = activeSample?.timestamp_sec ?? 0;
-
-  // 1. Cardioid Photoplethysmography Heart Canvas
+  // ---------------------------------------------------------------------------
+  // 1. CINEMA-GRADE 3D HOLOGRAPHIC CARDIOID ENGINE
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -68,154 +76,282 @@ export const RGBHeartVisualization: React.FC<RGBHeartProps> = ({
 
     let isMounted = true;
 
+    // Generate 3D Mathematical Cardioid Lattice
+    // Parametric surface: u in [0, PI], v in [-PI, PI]
+    const uRings = 24;
+    const vSteps = 32;
+
     const render = () => {
       if (!isMounted) return;
 
-      if (!prefersReducedMotion) {
-        // Pulse speed accelerates when playing and scales with BPM
-        const bpmSpeed = hasCardiacPulse ? (rawBpm / 72.0) * 0.04 : 0.025;
-        timeRef.current += isPlaying ? bpmSpeed * 1.4 : bpmSpeed;
-      }
+      // SPEED TUNING:
+      // Genuine: majestic, smooth, hypnotic (0.015 rad/frame)
+      // AI: controlled, turbulent agitation (0.036 rad/frame) with brief glitch bursts
+      const targetSpeed = isSynthetic ? 0.036 : isPlaying ? 0.020 : 0.014;
+      rotYRef.current += targetSpeed;
+      timeRef.current += 0.016;
+
       const t = timeRef.current;
+      const rotY = rotYRef.current;
+      const rotX = rotXRef.current + Math.sin(t * 0.9) * 0.03;
+      floatOffsetRef.current = Math.sin(t * 1.8) * 5; // Organic levitation bob
 
       ctx.clearRect(0, 0, width, height);
 
       const centerX = width / 2;
-      const centerY = height / 2 - 12;
-      // Controlled baseScale to keep cardioid strictly inside width/height
-      const baseScale = Math.min(width, height) / 44;
+      const centerY = height / 2 - 4 + floatOffsetRef.current;
+      const fov = 340;
+      const cameraDistance = 330;
+      const baseScale = Math.min(width, height) / 36;
 
-      // Concentric Calibration Circles
-      ctx.strokeStyle = "rgba(129, 118, 106, 0.14)";
-      ctx.lineWidth = 1;
-      ctx.setLineDash([3, 4]);
+      // Pulse breathing: Authentic 72 BPM cardiac expansion or synthetic micro-jitter
+      const pulseWave = hasCardiacPulse || isAiGenerated === false
+        ? Math.sin(t * 2.8) * 0.065 + Math.sin(t * 5.6) * 0.02
+        : isSynthetic
+        ? Math.sin(t * 7.0) * 0.045 + (Math.random() - 0.5) * 0.03
+        : Math.sin(t * 1.5) * 0.02;
+
+      const dynamicScale = baseScale * (1.0 + pulseWave);
+
+      // -----------------------------------------------------------------------
+      // A. Dark Holographic Chamber Background & Projector Beam
+      // -----------------------------------------------------------------------
+      // Chamber radial ambient glow
+      const chamberGrad = ctx.createRadialGradient(
+        centerX, centerY, 10,
+        centerX, centerY, width * 0.65
+      );
+      if (isSynthetic) {
+        chamberGrad.addColorStop(0, "rgba(255, 42, 85, 0.12)");
+        chamberGrad.addColorStop(0.5, "rgba(255, 107, 8, 0.04)");
+        chamberGrad.addColorStop(1, "rgba(10, 14, 23, 0.0)");
+      } else {
+        chamberGrad.addColorStop(0, "rgba(0, 242, 254, 0.12)");
+        chamberGrad.addColorStop(0.5, "rgba(0, 163, 255, 0.04)");
+        chamberGrad.addColorStop(1, "rgba(10, 14, 23, 0.0)");
+      }
+      ctx.fillStyle = chamberGrad;
+      ctx.fillRect(0, 0, width, height);
+
+      // Holographic Projector Emitter Pedestal (Base)
+      const pedestalY = height - 26;
+      ctx.save();
+      const emitterColor = isSynthetic ? "rgba(255, 42, 85, " : "rgba(0, 242, 254, ";
+      
+      // Projector beam cone radiating upward
+      const beamGrad = ctx.createLinearGradient(centerX, pedestalY, centerX, centerY);
+      beamGrad.addColorStop(0, `${emitterColor}0.25)`);
+      beamGrad.addColorStop(0.8, `${emitterColor}0.03)`);
+      beamGrad.addColorStop(1, `${emitterColor}0)`);
+      ctx.fillStyle = beamGrad;
       ctx.beginPath();
-      ctx.arc(centerX, centerY, baseScale * 14, 0, Math.PI * 2);
+      ctx.moveTo(centerX - 45, pedestalY);
+      ctx.lineTo(centerX + 45, pedestalY);
+      ctx.lineTo(centerX + 110, centerY - 60);
+      ctx.lineTo(centerX - 110, centerY - 60);
+      ctx.closePath();
+      ctx.fill();
+
+      // Pedestal rings
+      ctx.strokeStyle = `${emitterColor}0.35)`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(centerX, pedestalY, 52, 14, 0, 0, Math.PI * 2);
       ctx.stroke();
 
+      ctx.strokeStyle = `${emitterColor}0.65)`;
       ctx.beginPath();
-      ctx.arc(centerX, centerY, baseScale * 8, 0, Math.PI * 2);
+      ctx.ellipse(centerX, pedestalY, 28, 7.5, 0, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Pedestal glowing lens core
+      ctx.fillStyle = isSynthetic ? "#FF2A55" : "#00F2FE";
+      ctx.shadowColor = isSynthetic ? "#FF2A55" : "#00F2FE";
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(centerX, pedestalY, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      // -----------------------------------------------------------------------
+      // B. Concentric Holographic Gimbal Coordinate Rings (HUD Orbit)
+      // -----------------------------------------------------------------------
+      ctx.save();
+      ctx.strokeStyle = isSynthetic ? "rgba(255, 80, 80, 0.22)" : "rgba(0, 229, 255, 0.24)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 6]);
+
+      // Equatorial Gimbal Ring tilted in 3D
+      ctx.beginPath();
+      ctx.ellipse(centerX, centerY + 8, baseScale * 14.5, baseScale * 4.2, rotY * 0.4, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Polar Gimbal Ring
+      ctx.beginPath();
+      ctx.ellipse(centerX, centerY - 4, baseScale * 3.8, baseScale * 14.2, rotX * 0.5, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
+      ctx.restore();
 
-      // Subtle Axis Reticle
-      ctx.strokeStyle = "rgba(129, 118, 106, 0.20)";
-      ctx.beginPath();
-      ctx.moveTo(centerX - 18, centerY);
-      ctx.lineTo(centerX + 18, centerY);
-      ctx.moveTo(centerX, centerY - 18);
-      ctx.lineTo(centerX, centerY + 18);
-      ctx.stroke();
+      // -----------------------------------------------------------------------
+      // C. 3D Cardioid Points Calculation & Depth Projection
+      // -----------------------------------------------------------------------
+      interface HologramPoint {
+        px: number;
+        py: number;
+        z: number;
+        alpha: number;
+        isGlitch: boolean;
+      }
 
-      // Parametric Heart Cardioid Channel Function
-      const drawCardioidChannel = (
-        color: string,
-        channelNorm: number,
-        phaseOffset: number,
-        pulseAmp: number,
-        glowColor: string,
-        lineWidth: number,
-        fillGradient?: boolean
-      ) => {
-        ctx.save();
-        ctx.strokeStyle = color;
-        ctx.lineWidth = lineWidth;
-        ctx.shadowColor = glowColor;
-        ctx.shadowBlur = hasCardiacPulse ? 12 : 4;
+      const points: HologramPoint[] = [];
+
+      // Optional chromatic glitch burst for AI detection
+      const glitchActive = isSynthetic && Math.sin(t * 8.5) > 0.82;
+      const glitchShift = glitchActive ? (Math.random() - 0.5) * 8 : 0;
+
+      for (let i = 1; i < uRings; i++) {
+        const u = (i / uRings) * Math.PI;
+        const sinU = Math.sin(u);
+
+        for (let j = 0; j < vSteps; j++) {
+          const v = (j / vSteps) * Math.PI * 2 - Math.PI;
+
+          // Classical 3D parametric cardioid equations
+          const rawX = 16 * Math.pow(sinU, 3) * Math.cos(v);
+          const rawY = -(
+            13 * Math.cos(u) -
+            5 * Math.cos(2 * u) -
+            2 * Math.cos(3 * u) -
+            Math.cos(4 * u)
+          );
+          const rawZ = 16 * Math.pow(sinU, 3) * Math.sin(v) * 0.70;
+
+          // Surface perturbation (erratic arrhythmia ripple if AI)
+          const harmonic = isSynthetic
+            ? 1.0 + Math.sin(u * 6 + v * 5 + t * 9) * 0.08
+            : 1.0 + Math.sin(u * 4 + v * 3 + t * 2) * 0.015;
+
+          const scaledX = rawX * dynamicScale * harmonic;
+          const scaledY = rawY * dynamicScale * harmonic;
+          const scaledZ = rawZ * dynamicScale * harmonic;
+
+          // 3D Matrix Rotation (Yaw then Pitch)
+          const x1 = scaledX * Math.cos(rotY) + scaledZ * Math.sin(rotY);
+          const y1 = scaledY;
+          const z1 = -scaledX * Math.sin(rotY) + scaledZ * Math.cos(rotY);
+
+          const x2 = x1;
+          const y2 = y1 * Math.cos(rotX) - z1 * Math.sin(rotX);
+          const z2 = y1 * Math.sin(rotX) + z1 * Math.cos(rotX);
+
+          // Perspective Projection
+          const depth = z2 + cameraDistance;
+          const proj = fov / Math.max(depth, 40);
+          const px = centerX + x2 * proj + glitchShift;
+          const py = centerY + y2 * proj;
+
+          // Depth-based luminous transparency
+          const alpha = Math.max(0.12, Math.min(0.95, (z2 + 110) / 220));
+
+          points.push({ px, py, z: z2, alpha, isGlitch: glitchActive });
+        }
+      }
+
+      // Sort points by depth (Z-buffering for back-to-front rendering)
+      points.sort((a, b) => a.z - b.z);
+
+      // -----------------------------------------------------------------------
+      // D. Render Volumetric Holographic Nodes & Photon Trails
+      // -----------------------------------------------------------------------
+      ctx.save();
+      for (let k = 0; k < points.length; k++) {
+        const pt = points[k];
+        const isFore = pt.z > 0;
+        const radius = isFore ? pt.alpha * 2.2 : pt.alpha * 1.3;
 
         ctx.beginPath();
-        const steps = 180;
-        // Keep dynamicScale bounded between 0.88 and 1.15
-        const pulse = hasCardiacPulse
-          ? Math.sin(t * 2.8 + phaseOffset) * pulseAmp
-          : Math.sin(t * 0.6) * 0.015;
-        const dynamicScale = baseScale * (0.92 + channelNorm * 0.12 + pulse);
+        ctx.arc(pt.px, pt.py, radius, 0, Math.PI * 2);
 
-        for (let i = 0; i <= steps; i++) {
-          const theta = (i / steps) * Math.PI * 2;
-          const harmonicMod = 1.0 + Math.sin(theta * 6 + t * 2.0 + phaseOffset) * (Math.min(jitter, 0.08));
-
-          const rawX = 16 * Math.pow(Math.sin(theta), 3);
-          const rawY = -(
-            13 * Math.cos(theta) -
-            5 * Math.cos(2 * theta) -
-            2 * Math.cos(3 * theta) -
-            Math.cos(4 * theta)
-          );
-
-          const px = centerX + rawX * dynamicScale * harmonicMod;
-          const py = centerY + rawY * dynamicScale * harmonicMod;
-
-          if (i === 0) {
-            ctx.moveTo(px, py);
+        if (isSynthetic) {
+          // AI GENERATED: High-voltage Electric Crimson & Neon Coral
+          if (pt.isGlitch && k % 3 === 0) {
+            ctx.fillStyle = `rgba(0, 240, 255, ${pt.alpha * 0.9})`; // Chromatic cyan offset
           } else {
-            ctx.lineTo(px, py);
+            ctx.fillStyle = k % 5 === 0
+              ? `rgba(255, 180, 0, ${pt.alpha})` // Golden warning spark
+              : `rgba(255, 42, 85, ${pt.alpha * 0.95})`; // Electric crimson
+          }
+          if (isFore && k % 4 === 0) {
+            ctx.shadowColor = "#FF2A55";
+            ctx.shadowBlur = 8;
+          } else {
+            ctx.shadowBlur = 0;
+          }
+        } else {
+          // GENUINE / AUTHENTIC: Electric Cyan, Luminous Aqua & Warm Champagne Gold
+          ctx.fillStyle = k % 6 === 0
+            ? `rgba(233, 196, 106, ${pt.alpha * 0.95})` // Champagne Gold highlight
+            : `rgba(0, 242, 254, ${pt.alpha * 0.9})`; // Electric Cyan
+          if (isFore && k % 4 === 0) {
+            ctx.shadowColor = "#00F2FE";
+            ctx.shadowBlur = 7;
+          } else {
+            ctx.shadowBlur = 0;
           }
         }
 
-        ctx.closePath();
-        ctx.stroke();
-
-        if (fillGradient) {
-          const grad = ctx.createRadialGradient(centerX, centerY, 5, centerX, centerY, baseScale * 14);
-          grad.addColorStop(0, "rgba(217, 107, 53, 0.16)");
-          grad.addColorStop(1, "rgba(217, 107, 53, 0.0)");
-          ctx.fillStyle = grad;
-          ctx.fill();
-        }
-
-        ctx.restore();
-      };
-
-      // 1. Red Channel (Primary Terracotta Arterial Wave)
-      if (showR) {
-        drawCardioidChannel(
-          "#D96B35",
-          rVal,
-          0.0,
-          0.065,
-          "rgba(217, 107, 53, 0.55)",
-          2.6,
-          true
-        );
+        ctx.fill();
       }
+      ctx.restore();
 
-      // 2. Green Channel (rPPG Hemoglobin Absorption Wave)
-      if (showG) {
-        drawCardioidChannel(
-          "#2D6A4F",
-          gVal,
-          Math.PI * 0.25,
-          0.055,
-          "rgba(45, 106, 79, 0.55)",
-          2.0
-        );
-      }
+      // -----------------------------------------------------------------------
+      // E. Holographic Laser Scanning Plane Sweep
+      // -----------------------------------------------------------------------
+      const scanPeriod = (Math.sin(t * 2.4) + 1) / 2;
+      const scanY = centerY - baseScale * 13 + scanPeriod * (baseScale * 25);
 
-      // 3. Blue Channel (Venous Accent)
-      if (showB) {
-        drawCardioidChannel(
-          "#C6A64B",
-          bVal,
-          Math.PI * 0.50,
-          0.040,
-          "rgba(198, 166, 75, 0.45)",
-          1.5
-        );
-      }
-
-      // Orbiting Hemodynamic Photoplethysmography Dot
       ctx.save();
-      const dotTheta = t * 1.6;
-      const dotRadius = baseScale * 9.5;
-      const dotX = centerX + Math.cos(dotTheta) * dotRadius;
-      const dotY = centerY + Math.sin(dotTheta) * dotRadius * 0.88;
-      ctx.fillStyle = hasCardiacPulse ? "#D96B35" : "#81766A";
-      ctx.shadowColor = hasCardiacPulse ? "rgba(217, 107, 53, 0.8)" : "transparent";
+      const sweepGrad = ctx.createLinearGradient(centerX - baseScale * 14, scanY, centerX + baseScale * 14, scanY);
+      const sweepColor = isSynthetic ? "rgba(255, 42, 85, " : "rgba(0, 242, 254, ";
+      sweepGrad.addColorStop(0, `${sweepColor}0)`);
+      sweepGrad.addColorStop(0.5, `${sweepColor}0.85)`);
+      sweepGrad.addColorStop(1, `${sweepColor}0)`);
+
+      ctx.strokeStyle = sweepGrad;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(centerX - baseScale * 14, scanY);
+      ctx.lineTo(centerX + baseScale * 14, scanY);
+      ctx.stroke();
+
+      // Laser plane bloom
+      ctx.fillStyle = `${sweepColor}0.07)`;
+      ctx.fillRect(centerX - baseScale * 13, scanY - 2, baseScale * 26, 4);
+      ctx.restore();
+
+      // -----------------------------------------------------------------------
+      // F. Orbiting Photon Satellite & 3D Azimuth Tag
+      // -----------------------------------------------------------------------
+      ctx.save();
+      const satAngle = t * (isSynthetic ? 3.6 : 1.8);
+      const satRadiusX = baseScale * 13.5;
+      const satRadiusY = baseScale * 5.0;
+      const sx = centerX + Math.cos(satAngle) * satRadiusX;
+      const sy = centerY + Math.sin(satAngle) * satRadiusY;
+
+      ctx.fillStyle = isSynthetic ? "#FFD200" : "#E9C46A";
+      ctx.shadowColor = isSynthetic ? "#FF2A55" : "#00F2FE";
       ctx.shadowBlur = 10;
       ctx.beginPath();
-      ctx.arc(dotX, dotY, 4.0, 0, Math.PI * 2);
+      ctx.arc(sx, sy, 3.2, 0, Math.PI * 2);
       ctx.fill();
+
+      // Tiny HUD tag floating next to satellite
+      ctx.shadowBlur = 0;
+      ctx.font = "8px ui-monospace, monospace";
+      ctx.fillStyle = isSynthetic ? "rgba(255, 210, 0, 0.75)" : "rgba(233, 196, 106, 0.75)";
+      ctx.fillText(`SAT-${Math.round((satAngle % (Math.PI * 2)) * (180 / Math.PI))}°`, sx + 6, sy - 3);
       ctx.restore();
 
       animFrameRef.current = requestAnimationFrame(render);
@@ -229,9 +365,11 @@ export const RGBHeartVisualization: React.FC<RGBHeartProps> = ({
         cancelAnimationFrame(animFrameRef.current);
       }
     };
-  }, [width, height, isPlaying, prefersReducedMotion, rVal, gVal, bVal, jitter, hasCardiacPulse, rawBpm, showR, showG, showB]);
+  }, [width, height, isPlaying, isSynthetic, hasCardiacPulse, rawBpm, isAiGenerated]);
 
-  // 2. Live Arterial Blood Volume Pulse (rPPG Waveform) Canvas
+  // ---------------------------------------------------------------------------
+  // 2. LIVE rPPG HEMODYNAMIC WAVEFORM SPARKLINE
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     const ecgCanvas = ecgCanvasRef.current;
     if (!ecgCanvas) return;
@@ -239,33 +377,29 @@ export const RGBHeartVisualization: React.FC<RGBHeartProps> = ({
     if (!ctx) return;
 
     const w = width;
-    const h = 50;
+    const h = 40;
     ecgCanvas.width = w;
     ecgCanvas.height = h;
 
-    // Update history buffer
     const history = ecgHistoryRef.current;
     if (history.length === 0) {
-      for (let i = 0; i < 100; i++) history.push(0);
+      for (let i = 0; i < 90; i++) history.push(0);
     }
 
-    // Add new pulse sample
     const t = timeRef.current;
     let newSample = 0;
-    if (hasCardiacPulse) {
-      // Realistic systolic/diastolic photoplethysmogram wave
+    if (hasCardiacPulse || isAiGenerated === false) {
       const phase = (t * 2.8) % (Math.PI * 2);
-      newSample = Math.sin(phase) * 0.65 + Math.sin(phase * 2) * 0.25;
+      newSample = Math.sin(phase) * 0.68 + Math.sin(phase * 2) * 0.28;
     } else {
-      // Flatline with micro noise for synthetic media
-      newSample = (Math.random() - 0.5) * 0.08;
+      newSample = isSynthetic ? (Math.random() - 0.5) * 0.55 : (Math.random() - 0.5) * 0.1;
     }
-    history.push(newSample);
-    if (history.length > 120) history.shift();
 
-    // Draw ECG Curve
+    history.push(newSample);
+    if (history.length > 90) history.shift();
+
     ctx.clearRect(0, 0, w, h);
-    ctx.strokeStyle = hasCardiacPulse ? "#2D6A4F" : "rgba(217, 107, 53, 0.8)";
+    ctx.strokeStyle = isSynthetic ? "#FF2A55" : hasCardiacPulse || isAiGenerated === false ? "#00F2FE" : "#8A7E70";
     ctx.lineWidth = 1.8;
     ctx.beginPath();
 
@@ -278,225 +412,153 @@ export const RGBHeartVisualization: React.FC<RGBHeartProps> = ({
     }
     ctx.stroke();
 
-    // Draw active scanning head
-    ctx.fillStyle = hasCardiacPulse ? "#2D6A4F" : "#D96B35";
+    ctx.fillStyle = isSynthetic ? "#FF2A55" : "#00F2FE";
     ctx.beginPath();
     ctx.arc(w - 4, h / 2 - newSample * (h * 0.38), 3, 0, Math.PI * 2);
     ctx.fill();
-  }, [width, hasCardiacPulse, rVal, gVal]);
+  }, [width, hasCardiacPulse, isSynthetic, isAiGenerated]);
 
   return (
     <div
-      className={`card ${className}`}
-      style={{
-        display: "inline-flex",
-        flexDirection: "column",
-        alignItems: "center",
-        padding: "18px 22px",
-        backgroundColor: "var(--bg-surface)",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: 20,
-        boxShadow: "var(--shadow-md)",
-        width: width + 48,
-        maxWidth: "100%",
-        boxSizing: "border-box"
-      }}
+      className={`rounded-3xl border border-[#E8DFCF] bg-[#FFFDF9] p-5 shadow-sm flex flex-col items-center max-w-full ${className}`}
+      style={{ width: width + 36 }}
     >
       {/* Top Header & Cardiac Telemetry */}
-      <div
-        style={{
-          width: "100%",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 10,
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {/* Animated Beating Heart Icon */}
+      <div className="w-full flex items-center justify-between pb-3 mb-3 border-b border-[#EFE8DA]">
+        <div className="flex items-center gap-2.5">
           <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 32,
-              height: 32,
-              borderRadius: "50%",
-              backgroundColor: hasCardiacPulse ? "rgba(45, 106, 79, 0.12)" : "rgba(217, 107, 53, 0.12)",
-              color: hasCardiacPulse ? "#2D6A4F" : "#D96B35",
-              transform: hasCardiacPulse ? "scale(1.08)" : "none",
-              transition: "transform 0.15s ease-in-out"
-            }}
+            className={`w-8 h-8 rounded-xl flex items-center justify-center transition-transform ${
+              isSynthetic
+                ? "bg-red-50 text-[#FF2A55] animate-pulse"
+                : hasCardiacPulse || isAiGenerated === false
+                ? "bg-cyan-50 text-[#00A3FF]"
+                : "bg-[#F3ECE0] text-[#7A7165]"
+            }`}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
-            </svg>
+            <span className="material-symbols-outlined text-[19px]">
+              {isSynthetic ? "crisis_alert" : "cardiology"}
+            </span>
           </div>
-
           <div>
-            <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: "0.02em", color: "var(--text-primary)" }}>
-              {hasCardiacPulse ? `${displayBpm} BPM` : "NO PULSE (SYNTHETIC)"}
+            <div className="flex items-center gap-1.5">
+              <span className="font-bold text-xs text-[#2A2521]">
+                {title || "3D Holographic Cardioid Biometric"}
+              </span>
+              <span
+                className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-full ${
+                  isSynthetic
+                    ? "bg-red-100 text-[#FF2A55]"
+                    : hasCardiacPulse || isAiGenerated === false
+                    ? "bg-cyan-100 text-[#0084B4]"
+                    : "bg-[#F3ECE0] text-[#7A7165]"
+                }`}
+              >
+                {isSynthetic ? "TURBULENT GLITCH" : "STEADY HOLOGRAM"}
+              </span>
             </div>
-            <div style={{ fontSize: 10, color: hasCardiacPulse ? "var(--color-botanical-green)" : "var(--color-terracotta)", fontWeight: 600 }}>
-              {hasCardiacPulse ? "rPPG Cardiac Hemodynamics Verified" : "Synthetic Face / Flatline Profile"}
-            </div>
+            <p className="text-[10px] text-[#7A7165]">
+              {isSynthetic
+                ? "Volumetric chromatic disruption • Aperiodic neural flatline"
+                : hasCardiacPulse || isAiGenerated === false
+                ? "Luminescent optical perfusion • 72 BPM authentic rhythm"
+                : "Continuous holographic spatial projection"}
+            </p>
           </div>
         </div>
 
-        {activeSample && (
-          <span
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 11,
-              color: "var(--text-secondary)",
-              backgroundColor: "var(--bg-surface-secondary)",
-              padding: "3px 8px",
-              borderRadius: 6,
-            }}
-          >
-            F#{activeSample.frame_index} · {timestampSec.toFixed(2)}s
+        {/* BPM and Status */}
+        <div className="text-right">
+          <div className="font-mono font-extrabold text-xs text-[#2A2521]">
+            {isSynthetic ? "0.0 BPM" : hasCardiacPulse || isAiGenerated === false ? `${displayBpm} BPM` : "ACTIVE"}
+          </div>
+          <span className="text-[10px] text-[#8A7E70]">
+            {confidencePercent ? `${confidencePercent}% Conf` : isSynthetic ? "AI Disrupted" : "rPPG Pulse"}
           </span>
-        )}
+        </div>
       </div>
 
-      {/* Main Cardioid Canvas */}
-      <div style={{ position: "relative", width, height }}>
+      {/* 3D Holographic Chamber Canvas (Deep Space Optics Backdrop) */}
+      <div className="relative rounded-2xl overflow-hidden bg-[#0A0E17] border border-[#1E2638] flex items-center justify-center shadow-inner">
         <canvas
           ref={canvasRef}
           style={{
             width,
             height,
             display: "block",
-            borderRadius: 14,
           }}
         />
+
+        {/* Holographic Watermark HUD */}
+        <div className="absolute top-2.5 left-2.5 text-[9px] font-mono tracking-widest text-[#00F2FE]/70 uppercase select-none pointer-events-none bg-black/50 backdrop-blur-xs px-2 py-0.5 rounded border border-[#00F2FE]/20">
+          3D OPTICAL HOLOGRAM &bull; {isSynthetic ? "HIGH JITTER" : "SYNCHRONIZED"}
+        </div>
+
+        {/* Bottom Coordinates Readout */}
+        <div className="absolute bottom-2.5 right-2.5 text-[8px] font-mono text-white/50 select-none pointer-events-none">
+          FOV: 340mm &bull; {hasCardiacPulse ? "HEMODYNAMICS: NOMINAL" : "APERIODIC: SYNTHETIC"}
+        </div>
       </div>
 
-      {/* Rhythmic rPPG Pulse Waveform Canvas */}
-      <div style={{ width: "100%", marginTop: 4, marginBottom: 8 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
-          <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-secondary)", letterSpacing: "0.04em" }}>
-            HEMODYNAMIC WAVEFORM (GREEN SPECTRUM)
-          </span>
-          <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: hasCardiacPulse ? "var(--color-botanical-green)" : "var(--color-terracotta)" }}>
-            {hasCardiacPulse ? "PERIODIC" : "APERIODIC"}
+      {/* rPPG Waveform Sparkline */}
+      <div className="w-full mt-3 space-y-1">
+        <div className="flex justify-between items-center text-[10px] font-semibold text-[#7A7165]">
+          <span>HEMODYNAMIC VOLUMETRIC PULSE (GREEN CHANNEL)</span>
+          <span
+            className={`font-mono ${
+              isSynthetic ? "text-[#FF2A55]" : "text-[#00A3FF]"
+            }`}
+          >
+            {isSynthetic ? "APERIODIC (SYNTHETIC)" : "SYNCHRONIZED (AUTHENTIC)"}
           </span>
         </div>
         <canvas
           ref={ecgCanvasRef}
-          style={{
-            width: "100%",
-            height: 44,
-            display: "block",
-            borderRadius: 8,
-            backgroundColor: "var(--bg-surface-secondary)",
-            border: "1px solid var(--border-subtle)"
-          }}
+          className="w-full rounded-xl bg-[#0A0E17] border border-[#1E2638] block"
+          style={{ height: 38 }}
         />
       </div>
 
-      {/* Channel Solo Toggles & Metrics */}
+      {/* Channel Solo Toggles */}
       {showLabels && (
-        <div
-          style={{
-            width: "100%",
-            display: "flex",
-            flexDirection: "column",
-            gap: 10,
-            marginTop: 4,
-            paddingTop: 10,
-            borderTop: "1px solid var(--border-subtle)",
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-            {/* Red Channel Button */}
-            <button
-              onClick={() => interactive && setShowR(!showR)}
-              style={{
-                flex: 1,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                padding: "6px 8px",
-                borderRadius: 8,
-                border: "1px solid",
-                borderColor: showR ? "var(--color-terracotta)" : "var(--border-subtle)",
-                backgroundColor: showR ? "rgba(217, 107, 53, 0.12)" : "transparent",
-                cursor: interactive ? "pointer" : "default",
-                transition: "all var(--trans-quick)",
-              }}
-            >
-              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--color-terracotta)" }}>
-                R-CHANNEL
-              </span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
-                {rDisplay}
-              </span>
-            </button>
-
-            {/* Green Channel Button (rPPG Heart Rate Sensor) */}
-            <button
-              onClick={() => interactive && setShowG(!showG)}
-              style={{
-                flex: 1,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                padding: "6px 8px",
-                borderRadius: 8,
-                border: "1px solid",
-                borderColor: showG ? "var(--color-botanical-green)" : "var(--border-subtle)",
-                backgroundColor: showG ? "rgba(45, 106, 79, 0.12)" : "transparent",
-                cursor: interactive ? "pointer" : "default",
-                transition: "all var(--trans-quick)",
-              }}
-            >
-              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--color-botanical-green)" }}>
-                G-rPPG
-              </span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
-                {gDisplay}
-              </span>
-            </button>
-
-            {/* Blue Channel Button */}
-            <button
-              onClick={() => interactive && setShowB(!showB)}
-              style={{
-                flex: 1,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                padding: "6px 8px",
-                borderRadius: 8,
-                border: "1px solid",
-                borderColor: showB ? "var(--color-espresso)" : "var(--border-subtle)",
-                backgroundColor: showB ? "rgba(48, 39, 31, 0.08)" : "transparent",
-                cursor: interactive ? "pointer" : "default",
-                transition: "all var(--trans-quick)",
-              }}
-            >
-              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-primary)" }}>
-                B-CHANNEL
-              </span>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 600, color: "var(--text-primary)" }}>
-                {bDisplay}
-              </span>
-            </button>
-          </div>
-
-          <div
-            style={{
-              fontSize: 10,
-              color: "var(--text-secondary)",
-              textAlign: "center",
-              lineHeight: 1.4,
-            }}
+        <div className="w-full mt-3 pt-3 border-t border-[#EFE8DA] grid grid-cols-3 gap-2">
+          <button
+            type="button"
+            onClick={() => interactive && setShowR(!showR)}
+            className={`py-1.5 px-2 rounded-xl border text-center transition-all text-xs font-semibold ${
+              showR
+                ? "bg-[#FFF2F4] border-[#FF2A55] text-[#FF2A55]"
+                : "bg-white border-[#E2D6C0] text-[#8A7E70]"
+            }`}
           >
-            {hasCardiacPulse
-              ? "Synchronized cardiac rhythm: Green-channel micro-absorption matches mammalian capillary pulse."
-              : "Aperiodic neural signal: Absence of cardiac pulse indicates generative AI face synthesis."}
-          </div>
+            <div className="text-[9px] font-mono text-[#8A7E70]">R-ARTERIAL</div>
+            <div className="font-mono text-xs">{rDisplay}</div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => interactive && setShowG(!showG)}
+            className={`py-1.5 px-2 rounded-xl border text-center transition-all text-xs font-semibold ${
+              showG
+                ? "bg-[#EBFBFF] border-[#00A3FF] text-[#0084B4]"
+                : "bg-white border-[#E2D6C0] text-[#8A7E70]"
+            }`}
+          >
+            <div className="text-[9px] font-mono text-[#8A7E70]">G-rPPG CAPILLARY</div>
+            <div className="font-mono text-xs">{gDisplay}</div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => interactive && setShowB(!showB)}
+            className={`py-1.5 px-2 rounded-xl border text-center transition-all text-xs font-semibold ${
+              showB
+                ? "bg-[#FFFBEB] border-[#E9C46A] text-[#8A6714]"
+                : "bg-white border-[#E2D6C0] text-[#8A7E70]"
+            }`}
+          >
+            <div className="text-[9px] font-mono text-[#8A7E70]">B-VENOUS</div>
+            <div className="font-mono text-xs">{bDisplay}</div>
+          </button>
         </div>
       )}
     </div>
