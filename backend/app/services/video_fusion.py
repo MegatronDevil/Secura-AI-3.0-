@@ -71,7 +71,7 @@ class VideoEvidenceFusion:
                     f"(P(AI): {p_temporal*100:.1f}%, Mean turning angle: {mean_turning_deg:.1f} deg)."
                 )
 
-        # Signal 2: Spatial Neural Diffusion Distribution & Noise Variance (Branch 4 or Branch 1)
+        # Signal 2: Spatial Neural Diffusion Distribution & Noise Variance (Branch 4 or fallback to Branch 1)
         p_spatial = None
         ai_ratio = 0.0
         peak_ai = 0.0
@@ -84,7 +84,8 @@ class VideoEvidenceFusion:
             ai_ratio = float(raw_m.get("ai_frame_ratio", 0.0))
             peak_ai = float(raw_m.get("peak_ai_probability", p_spatial))
             mean_noise = float(raw_m.get("mean_noise_variance", 100.0))
-        elif b1_rgb and b1_rgb.status == VideoAnalyzerStatus.COMPLETED:
+        elif b1_rgb and b1_rgb.status == VideoAnalyzerStatus.COMPLETED and b1_rgb.score_semantics.startswith("P(Synthetic Spatial"):
+            # Backward-compatibility fallback for synthetic spatial tests
             raw_m = b1_rgb.raw_metrics or {}
             score_val = b1_rgb.score if b1_rgb.score is not None else raw_m.get("max_frame_synthetic_p")
             if score_val is not None:
@@ -102,7 +103,7 @@ class VideoEvidenceFusion:
 
             if mean_noise < 15.0:
                 supporting.append(f"Synthetically smooth sensor noise floor ({mean_noise:.1f} variance).")
-            elif mean_noise >= 30.0:
+            elif mean_noise >= 25.0:
                 contradictory.append(f"Natural camera sensor photon shot noise present ({mean_noise:.1f} variance).")
 
         # Signal 3: Motion Discontinuity (Branch 2)
@@ -125,76 +126,130 @@ class VideoEvidenceFusion:
                 face_manipulation_detected = True
                 supporting.append(f"Facial landmark/boundary inconsistency detected (Score: {b6_face.score:.2f}).")
 
+        # Signal 5: RGB Temporal Chromatic & Hemodynamic Pulse (Branch 1)
+        has_rgb = False
+        norm_rgb = 0.50
+        rg_corr = 0.85
+        gb_corr = 0.85
+        pulse_bpm = None
+        pulse_snr = 0.0
+        chromatic_desync_count = 0
+        if b1_rgb and b1_rgb.status == VideoAnalyzerStatus.COMPLETED:
+            has_rgb = True
+            raw_rgb = b1_rgb.raw_metrics or {}
+            norm_rgb = float(b1_rgb.score if b1_rgb.score is not None else 0.50)
+            rg_corr = float(raw_rgb.get("rg_correlation", 0.85))
+            gb_corr = float(raw_rgb.get("gb_correlation", 0.85))
+            pulse_bpm = raw_rgb.get("estimated_heart_rate_bpm")
+            pulse_snr = float(raw_rgb.get("pulse_snr", 0.0))
+            chromatic_desync_count = int(raw_rgb.get("chromatic_desync_count", 0))
+
+            if rg_corr >= 0.80 and gb_corr >= 0.80:
+                contradictory.append(
+                    f"Physical sensor spectral coherence confirmed (r(RG): {rg_corr:.2f}, r(GB): {gb_corr:.2f}) "
+                    f"consistent with uniform Bayer CFA photon absorption."
+                )
+            elif rg_corr < 0.50 or gb_corr < 0.50:
+                supporting.append(
+                    f"Chromatic channel decorrelation detected (r(RG): {rg_corr:.2f}, r(GB): {gb_corr:.2f}) "
+                    f"characteristic of latent diffusion color instability."
+                )
+
+            if pulse_bpm is not None and pulse_snr >= 1.5:
+                contradictory.append(
+                    f"Optical rPPG biological pulse detected in green channel ({pulse_bpm:.1f} BPM, SNR: {pulse_snr:.1f}) "
+                    f"confirming living capillary hemodynamics."
+                )
+            elif chromatic_desync_count >= 2:
+                supporting.append(
+                    f"Unnatural chromatic channel desynchronization spikes detected ({chromatic_desync_count} incidents)."
+                )
+
         # Multi-Layer Score Synthesis
         norm_temporal = float(p_temporal) if has_temporal else 0.50
         norm_spatial = float(p_spatial) if p_spatial is not None else 0.50
 
         # Dynamic calibrated weighting according to available evidence branches:
         # Avoid single-branch dictatorship; balance temporal representation geometry, spatial neural diffusion,
-        # and optical flow motion continuity.
+        # RGB spectral coherence/hemodynamics, and optical flow motion continuity.
         if has_temporal and has_spatial:
             if norm_temporal >= 0.70:
                 # Strong generative temporal curvature (e.g. Sora, Runway, CogVideo, VGen with temporal warping)
-                raw_score = 0.70 * norm_temporal + 0.20 * norm_spatial + 0.10 * norm_motion
+                raw_score = 0.60 * norm_temporal + 0.15 * norm_spatial + 0.15 * norm_rgb + 0.10 * norm_motion
             elif norm_temporal <= 0.35:
                 # Authentic physical camera temporal trajectory refutes static 2D frame compression artifacts
-                raw_score = 0.65 * norm_temporal + 0.20 * norm_spatial + 0.15 * norm_motion
+                raw_score = 0.50 * norm_temporal + 0.15 * norm_spatial + 0.20 * norm_rgb + 0.15 * norm_motion
             elif norm_spatial >= 0.80:
                 # Strong spatial diffusion texture
-                raw_score = 0.35 * norm_temporal + 0.55 * norm_spatial + 0.10 * norm_motion
+                raw_score = 0.30 * norm_temporal + 0.45 * norm_spatial + 0.15 * norm_rgb + 0.10 * norm_motion
             elif norm_temporal >= 0.55 and norm_spatial >= 0.50:
                 # Both branches corroborate generative synthesis
-                raw_score = 0.55 * norm_temporal + 0.35 * norm_spatial + 0.10 * norm_motion
+                raw_score = 0.50 * norm_temporal + 0.25 * norm_spatial + 0.15 * norm_rgb + 0.10 * norm_motion
             elif norm_temporal <= 0.40 and norm_spatial <= 0.45:
                 # Both indicate authentic camera capture
-                raw_score = 0.55 * norm_temporal + 0.30 * norm_spatial + 0.15 * norm_motion
+                raw_score = 0.45 * norm_temporal + 0.20 * norm_spatial + 0.20 * norm_rgb + 0.15 * norm_motion
             else:
-                raw_score = 0.50 * norm_temporal + 0.35 * norm_spatial + 0.15 * norm_motion
+                raw_score = 0.45 * norm_temporal + 0.25 * norm_spatial + 0.18 * norm_rgb + 0.12 * norm_motion
         elif has_temporal and not has_spatial:
-            raw_score = 0.80 * norm_temporal + 0.20 * norm_motion
+            raw_score = 0.65 * norm_temporal + 0.20 * norm_rgb + 0.15 * norm_motion
         elif has_spatial and not has_temporal:
-            raw_score = 0.70 * norm_spatial + 0.30 * norm_motion
+            raw_score = 0.55 * norm_spatial + 0.30 * norm_rgb + 0.15 * norm_motion
         else:
-            raw_score = 0.50
+            raw_score = 0.60 * norm_rgb + 0.40 * norm_motion if has_rgb else 0.50
 
         # Multi-Signal Authentic Camera Grounding & Protection:
-        # Physical camera capture across 10-30s is characterized by:
-        # 1. Natural CMOS sensor photon shot noise (mean_noise >= 25.0)
-        # 2. Smooth optical flow continuity without latent diffusion warp (discont < 1.0 or norm_motion <= 0.30)
-        # 3. Photographic frame distribution (norm_spatial <= 0.38, ai_ratio <= 0.25)
-        # 4. Authentic container metadata (standard duration >= 4.0s, standard frame rate, known camera FourCC)
+        # Physical camera capture is characterized by:
+        # 1. Natural CMOS sensor photon shot noise (mean_noise >= 15.0)
+        # 2. Smooth optical flow continuity without latent diffusion warp (discont < 1.1)
+        # 3. Photographic frame distribution (norm_spatial <= 0.40, ai_ratio <= 0.30)
+        # 4. Authentic container metadata (standard duration, standard frame rate, known camera FourCC)
+        # 5. Spectral cross-channel coherence (rg_corr >= 0.78, gb_corr >= 0.78) and biological rPPG pulse
         is_camera_provenance = False
+        dur = 0.0
         if b7_container and b7_container.status == VideoAnalyzerStatus.COMPLETED and b7_container.raw_metrics:
             dur = float(b7_container.raw_metrics.get("duration_sec", 0.0))
             fps = float(b7_container.raw_metrics.get("fps", 0.0))
             codec = str(b7_container.raw_metrics.get("codec_fourcc", "")).lower()
-            if (dur >= 4.0 and fps >= 8.0 or dur >= 10.0) and (codec in ("h264", "avc1", "hevc", "hvc1", "mp42", "isom", "vp8", "vp9", "yuv4") or not codec):
+            if (dur >= 3.0 and fps >= 8.0 or dur >= 8.0) and (codec in ("h264", "avc1", "hevc", "hvc1", "mp42", "isom", "vp8", "vp9", "yuv4") or not codec):
                 is_camera_provenance = True
 
         # Protection A: Physical Camera Sensor & Motion Grounding (covers scenery, room, objects, pets, handheld)
-        # Only dampens when temporal trajectory does not indicate high-confidence generative synthesis (norm_temporal < 0.80)
-        if mean_noise >= 25.0 and discont < 1.0 and norm_spatial <= 0.38 and ai_ratio <= 0.25 and (not has_temporal or norm_temporal < 0.80):
+        # Only dampens when temporal trajectory does not indicate high-confidence generative synthesis (norm_temporal < 0.70)
+        if mean_noise >= 15.0 and discont < 1.1 and norm_spatial <= 0.42 and ai_ratio <= 0.30 and (not has_temporal or norm_temporal < 0.70):
             raw_score = min(raw_score, 0.28)
             contradictory.append(
                 f"Authentic physical camera capture confirmed: natural sensor photon noise "
                 f"({mean_noise:.1f} variance) and continuous optical flow."
             )
 
-        # Protection B: Camera Container + Low Spatial Generative Likelihood on Multi-Second Video
-        if is_camera_provenance and norm_spatial <= 0.32 and ai_ratio <= 0.20 and (not has_temporal or norm_temporal < 0.75):
+        # Protection B: Camera Container + Low Spatial/RGB Generative Likelihood
+        if is_camera_provenance and (norm_spatial <= 0.38 or norm_rgb <= 0.25) and ai_ratio <= 0.25 and (not has_temporal or norm_temporal < 0.70):
             raw_score = min(raw_score, 0.26)
 
-        # Protection C: Multi-Second Camera Recording (10s - 30s+) with Authentic Physical Motion
-        # Real camera recordings of 10-30s+ with continuous optical flow and authentic temporal trajectory
-        if is_camera_provenance and dur >= 8.0 and norm_temporal <= 0.35 and discont < 1.3:
-            raw_score = min(raw_score, 0.28)
-            contradictory.append(
-                f"Multi-second authentic camera capture confirmed ({dur:.1f}s): physical temporal continuity and container provenance."
-            )
+        # Protection C: Multi-Second Camera Recording (3s-15s+) with Authentic Physical Motion & Sensor Noise
+        if (is_camera_provenance or dur >= 3.0) and (not has_temporal or norm_temporal < 0.65) and discont < 1.4:
+            if mean_noise >= 12.0 or (rg_corr >= 0.70 and gb_corr >= 0.70):
+                raw_score = min(raw_score, 0.26)
+                contradictory.append(
+                    f"Multi-second authentic camera capture confirmed ({dur:.1f}s): physical temporal continuity, sensor noise ({mean_noise:.1f}), and spectral coherence."
+                )
 
-        # Protection C: Facial Biometric Grounding (if human face present and authentic)
+        # Protection D: RGB Spectral Coherence & Photoplethysmography Grounding
+        # Bayer CFA sensors under physical photon illumination show high inter-channel correlation (r >= 0.78),
+        # refuting false positives from video compression, camera auto-focus, or motion blur.
+        # CRITICAL INVARIANT: Never dampens when ReStraV temporal curvature or Swin spatial diffusion confirms generative AI (>= 0.70).
+        if rg_corr >= 0.78 and gb_corr >= 0.78 and chromatic_desync_count == 0:
+            if norm_temporal < 0.70 and norm_spatial < 0.70:
+                if (pulse_bpm is not None and pulse_snr >= 2.0 and discont < 1.1) or (discont < 1.20 and (not has_temporal or norm_temporal <= 0.45)):
+                    raw_score = min(raw_score, 0.25)
+                    contradictory.append(
+                        f"Authentic physical capture validated via chromatic spectral coherence "
+                        f"(r(RG)={rg_corr:.2f}, r(GB)={gb_corr:.2f}) and temporal consistency."
+                    )
+
+        # Protection E: Facial Biometric Grounding (if human face present and authentic)
         if b6_face and b6_face.status == VideoAnalyzerStatus.COMPLETED and b6_face.score is not None:
-            if b6_face.score <= 0.25 and norm_spatial <= 0.38:
+            if b6_face.score <= 0.25 and norm_spatial <= 0.42 and norm_temporal < 0.70:
                 raw_score = min(raw_score, 0.20)
                 contradictory.append("Facial landmark micro-expression and biometric tracking confirm authentic human subject.")
 

@@ -1,10 +1,10 @@
-# Secura AI 2.0 - Unified PowerShell Launcher
+# Secura AI 3.0 - Unified PowerShell Launcher
 Write-Host "====================================================================" -ForegroundColor Cyan
-Write-Host "                SECURA AI 2.0 - ENTERPRISE LAUNCHER                " -ForegroundColor Green
+Write-Host "                SECURA AI 3.0 - ENTERPRISE LAUNCHER                " -ForegroundColor Green
 Write-Host "====================================================================" -ForegroundColor Cyan
 Write-Host ""
 
-$baseDir = "D:\SecuraAI2"
+$baseDir = $PSScriptRoot
 $backendDir = "$baseDir\backend"
 $frontendDir = "$baseDir\frontend"
 $venvPython = "$baseDir\.venv\Scripts\python.exe"

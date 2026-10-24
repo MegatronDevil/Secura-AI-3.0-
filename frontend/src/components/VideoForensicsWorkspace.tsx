@@ -920,8 +920,8 @@ export const VideoForensicsWorkspace: React.FC<VideoForensicsWorkspaceProps> = (
                   </div>
                   <span className={`block font-mono-data text-[0.625rem] ${isAIGenerated ? "text-error" : "text-emerald-700"}`}>
                     {isAIGenerated
-                      ? "Biological pulse flatline detected (0.00 bpm)"
-                      : "Cardiac rhythm detected (72.4 bpm synchronous)"}
+                      ? "High-frequency chromatic variance / aperiodic"
+                      : "Harmonic chromatic consistency verified"}
                   </span>
                 </div>
 
@@ -1058,18 +1058,18 @@ export const VideoForensicsWorkspace: React.FC<VideoForensicsWorkspaceProps> = (
                       isAIGenerated ? "bg-error/10 text-error" : "bg-emerald-100 text-emerald-800"
                     }`}
                   >
-                    {isAIGenerated ? "FLATLINE" : "PULSE VERIFIED"}
+                    {isAIGenerated ? "APERIODIC" : "HARMONIC"}
                   </span>
                 </div>
                 <p className="font-body-sm text-body-sm text-on-surface-variant">
-                  Natural human vascular circulation creates microscopic skin color fluctuations matching cardiac rhythm across R, G, and B wavelength strata.
+                  RGB wavelength distribution measures temporal color consistency across frames. (Note: Geometric demonstration signal; not clinical biometric evidence).
                 </p>
-                {/* Inline SVG Biological Waveform vs Synthetic Flatline */}
+                {/* Inline SVG Chromatic Waveform */}
                 <div className="p-space-sm rounded-xl bg-[#1c1b1a] text-[#f4f0ec] space-y-2">
                   <div className="flex justify-between items-center font-mono-data text-[0.625rem]">
-                    <span className="text-emerald-400">Baseline Cardiac Ref (72 bpm)</span>
+                    <span className="text-emerald-400">Harmonic Reference Base</span>
                     <span className={isAIGenerated ? "text-error font-semibold" : "text-emerald-400"}>
-                      Target Facial Mesh ({isAIGenerated ? "0 bpm" : "72.4 bpm"})
+                      Chromatic Tracking ({isAIGenerated ? "Disrupted" : "Harmonic"})
                     </span>
                   </div>
                   <svg className="w-full h-16" fill="none" viewBox="0 0 300 64">

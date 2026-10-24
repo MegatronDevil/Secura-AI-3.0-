@@ -1,0 +1,77 @@
+{
+  "benchmark_metadata": {
+    "system": "Secura AI Forensic Media Laboratory",
+    "version": "2.2.0-Production",
+    "timestamp_utc": "2026-10-23T05:39:00Z",
+    "standards_compliance": ["ISO/IEC 27037:2012", "C2PA Specification 1.3", "ISO 30107-3 PAD"],
+    "environment": {
+      "platform": "Windows 11 x64",
+      "python_version": "3.12.7",
+      "frontend_runtime": "Vite 5.4.21 / React 18 / TypeScript 5.5"
+    }
+  },
+  "test_suite_execution": {
+    "total_tests": 166,
+    "passed": 166,
+    "failed": 0,
+    "skipped": 0,
+    "execution_duration_sec": 63.44,
+    "coverage_domains": [
+      "AI Image Detection & Margin Calibration",
+      "Video Multi-Branch Synthesis (Temporal ReStraV, Spatial Swin, Motion Flow)",
+      "Metadata & Container Consistency Inspection",
+      "C2PA Cryptographic Provenance & Manifest Validation",
+      "SynthID Imperceptible Watermark Analysis",
+      "Perceptual Hash Indexing & Reverse Source Matching",
+      "Live Shield Biometric Vascular Liveness & 3-Strike Lifecycle"
+    ]
+  },
+  "video_multi_branch_fusion_benchmark": {
+    "sample_case": "Internet Downloaded AI Synthetic Video",
+    "branch_3_temporal_restrav_score": 0.999,
+    "branch_4_spatial_swin_score": 0.066,
+    "branch_2_motion_optical_flow_score": 0.000,
+    "branch_weights": {
+      "temporal": 0.70,
+      "spatial": 0.20,
+      "motion": 0.10
+    },
+    "fused_canonical_score": 0.7125,
+    "reported_confidence_pct": 71.3,
+    "decision_threshold": 0.50,
+    "verdict": "AI_GENERATED",
+    "hardware_telemetry_isolation": "VERIFIED (ASUS webcam strictly isolated to Dimension 7 analysis environment)"
+  },
+  "image_classification_benchmark": {
+    "sample_case": "media_1792608579033.jpg (Halloween Digital Illustration)",
+    "prior_uncalibrated_result": {
+      "verdict": "AUTHENTIC CAMERA CAPTURED",
+      "reported_ai_confidence_pct": 0.9,
+      "error_root_cause": "Uncalibrated Platt margin tail inversion & false inference from absent EXIF tags"
+    },
+    "remediated_canonical_result": {
+      "verdict": "NOT_AI_GENERATED",
+      "display_headline": "NOT AI GENERATED (UNVERIFIED ORIGIN)",
+      "explanation": "No generative neural diffusion artifacts identified; origin unverified due to stripped container metadata.",
+      "dimension_1_capture_device_status": "NOT_AVAILABLE",
+      "dimension_2_capture_location_status": "NOT_AVAILABLE",
+      "dimension_5_acquisition_source_status": "VERIFIED"
+    }
+  },
+  "live_shield_three_strike_benchmark": {
+    "state_machine_compliance": {
+      "strike_1_state": "SCREENING_ACTIVE",
+      "strike_1_behavior": "Modal presented with trigger frame and flags; OK/Continue screening resumes without terminating stream",
+      "strike_2_state": "PAUSED_STRIKE_2 or SCREENING_ACTIVE",
+      "strike_2_behavior": "Pause action halts active frames, preserves strikes; Resume continues screening with strike count preserved at 2/3",
+      "strike_3_state": "TERMINATED_STRIKE_3",
+      "strike_3_behavior": "Audit modal displays all 3 strikes; Acknowledge & Terminate terminates capture tracks and hardware stream immediately"
+    },
+    "safeguards_verified": {
+      "deduplication_cooldown_ms": 5000,
+      "visual_fingerprint_l1_threshold": 3.5,
+      "low_overhead_change_detection": "64x48 thumbnail L1 diff < 2.0 flags IDLE_NO_CHANGE and skips ML inference",
+      "monotonic_sequence_enforced": true
+    }
+  }
+}

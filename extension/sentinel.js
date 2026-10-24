@@ -1,6 +1,15 @@
 // Secura AI - Live Screen Sentinel Controller
 (() => {
-  const API_BASE_URL = "http://127.0.0.1:8000";
+  let API_BASE_URL = "http://127.0.0.1:8000";
+
+  // Load configured API URL
+  if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+    chrome.storage.local.get("secura_api_url", (data) => {
+      if (data && data.secura_api_url) {
+        API_BASE_URL = data.secura_api_url;
+      }
+    });
+  }
 
   // State
   let activeStream = null;
@@ -158,8 +167,9 @@
       scheduleAnalysis(200);
       syncWithCookies();
     } catch (err) {
-      console.error("Display media error:", err);
-      alert("Unable to initiate screen sharing: " + (err.message || "Permission canceled"));
+      console.warn("Display media selection cancelled or failed:", err);
+      streamStateText.textContent = "Screen sharing cancelled or not granted";
+      stopScreenShare();
     }
   }
 
@@ -311,10 +321,10 @@
       lastFpsTime = now;
     }
 
-    // Heuristic pulse simulation based on sine modulation
-    const simBpm = 72 + Math.sin(now / 1500) * 4;
-    bpmReading.textContent = `${simBpm.toFixed(1)} BPM (Offline)`;
-    pulseHistory.push(simBpm);
+    // Offline chromatic baseline simulation for demonstration
+    bpmReading.textContent = `Offline Baseline`;
+    const simVal = 70 + Math.sin(now / 1500) * 3;
+    pulseHistory.push(simVal);
     if (pulseHistory.length > 30) pulseHistory.shift();
     drawWaveform();
 
@@ -342,11 +352,15 @@
     }
 
     // 2. Telemetry metrics
-    const aiScore = Math.round(res.synthetic_confidence * 100);
+    const aiConfidence = res.synthetic_confidence !== undefined ? res.synthetic_confidence : (res.neural_ai_score !== undefined ? res.neural_ai_score : 0.0);
+    const aiScore = Math.round(aiConfidence * 100);
+    const varScore = res.blood_volume_variance !== undefined ? res.blood_volume_variance.toFixed(4) : "0.0000";
+    const tempScore = res.temporal_consistency !== undefined ? (res.temporal_consistency * 100).toFixed(1) : "99.0";
+
     riskScoreNum.textContent = `${aiScore}%`;
-    swinScoreText.textContent = `${(res.synthetic_confidence * 100).toFixed(1)}% Synthetic`;
-    varScoreText.textContent = res.blood_volume_variance.toFixed(4);
-    temporalScoreText.textContent = `${(res.temporal_consistency * 100).toFixed(1)}%`;
+    swinScoreText.textContent = `${(aiConfidence * 100).toFixed(1)}% Synthetic`;
+    varScoreText.textContent = varScore;
+    temporalScoreText.textContent = `${tempScore}%`;
 
     if (res.rppg_pulse_estimate && res.rppg_pulse_estimate > 0) {
       bpmReading.textContent = `${res.rppg_pulse_estimate.toFixed(1)} BPM`;
@@ -373,15 +387,18 @@
       faceBox.style.display = "none";
     }
 
-    // 4. Decision: Check if current frame contains synthetic content
-    const isSynthetic = res.verdict === "DEEPFAKE_INJECTION_DETECTED" || res.synthetic_confidence >= 0.50;
+    // 4. Decision: Strict separation of AI vs Authentic
+    const isSynthetic = res.verdict === "DEEPFAKE_INJECTION_DETECTED" || aiConfidence >= 0.50;
     lastSyntheticStatus = isSynthetic;
 
     if (isSynthetic) {
       // Turn border RED immediately when AI content is on screen
       setViewportBorder("red");
+      verdictLabel.textContent = "SYNTHETIC AI DEEPFAKE DETECTED";
+      verdictLabel.style.color = "#ef4444";
+      riskScoreNum.style.color = "#ef4444";
 
-      // If we are already counting down the 3-second grace window, let the user close it
+      // If we are already counting down the grace window, let the user close it
       if (!isGraceActive) {
         consecutiveStrikes++;
         updateStrikeUI();
@@ -400,7 +417,7 @@
         resolveGracePeriodSuccess();
       } else {
         setViewportBorder("green");
-        verdictLabel.textContent = "VERIFIED AUTHENTIC";
+        verdictLabel.textContent = "VERIFIED AUTHENTIC (NOT AI)";
         verdictLabel.style.color = "#10b981";
         riskScoreNum.style.color = "#10b981";
 
@@ -611,4 +628,12 @@
 
   // On mount
   syncWithCookies();
+
+  // If opened with autostart=1 from popup
+  if (window.location.search && window.location.search.includes("autostart=1")) {
+    if (startShareBtn) {
+      startShareBtn.style.boxShadow = "0 0 28px rgba(16, 185, 129, 0.85)";
+      startShareBtn.focus();
+    }
+  }
 })();

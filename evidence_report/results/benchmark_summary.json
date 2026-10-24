@@ -1,0 +1,36 @@
+{
+  "benchmark_date_utc": "2026-10-24T16:13:08.396288+00:00",
+  "application_name": "Secura AI",
+  "version": "2.0.0",
+  "hardware_environment": "NVIDIA RTX 5070 Host (Active: CPU)",
+  "models_evaluated": {
+    "image": "Multi-Architecture Ensemble (Swin Transformer + CLIP ViT-L/14 Linear Probe)",
+    "video": "Multi-Branch Fusion Engine (ReStraV DINOv2 MLP + Swin Spatial + Farneback Optical Flow + Container Provenance)"
+  },
+  "image_benchmark": {
+    "total_samples": 100,
+    "ai_samples": 50,
+    "real_samples": 50,
+    "tp": 49,
+    "fn": 1,
+    "tn": 49,
+    "fp": 1,
+    "accuracy": 0.98,
+    "precision": 0.98,
+    "recall": 0.98,
+    "f1_score": 0.98
+  },
+  "video_benchmark": {
+    "total_samples": 40,
+    "ai_samples": 20,
+    "real_samples": 20,
+    "tp": 19,
+    "fn": 1,
+    "tn": 20,
+    "fp": 0,
+    "accuracy": 0.975,
+    "precision": 1.0,
+    "recall": 0.95,
+    "f1_score": 0.9744
+  }
+}

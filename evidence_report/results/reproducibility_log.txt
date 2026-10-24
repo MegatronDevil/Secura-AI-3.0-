@@ -1,0 +1,14 @@
+SECURA AI EXPERIMENTAL REPRODUCIBILITY LOG
+Execution Date: 2026-10-24T15:57:44.713895+00:00
+Backend Endpoint: http://127.0.0.1:8000
+Host Hardware: NVIDIA RTX 5070 Host (Active: CPU) (VRAM: 12227.0 MB)
+Backbone: OpenAI CLIP ViT-L/14 Vision Backbone
+----------------------------------------------------------------------
+IMAGE BENCHMARK RESULTS:
+TP: 49, FN: 1, TN: 49, FP: 1
+Accuracy: 98.00%, Precision: 98.00%, Recall: 98.00%, F1: 0.9800
+----------------------------------------------------------------------
+VIDEO BENCHMARK RESULTS:
+TP: 19, FN: 1, TN: 20, FP: 0
+Accuracy: 97.50%, Precision: 100.00%, Recall: 95.00%, F1: 0.9744
+======================================================================

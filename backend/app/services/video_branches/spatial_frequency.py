@@ -60,17 +60,13 @@ class SpatialFrequencyBranch(BaseVideoBranch):
             var_noise = float(np.var(lap))
             noise_vars.append(var_noise)
 
-            # Frame-level diffusion inference without mutating detector active_head
+            # Frame-level diffusion inference with calibrated video frame compensation
             p_ai = 0.5
             try:
                 pil_img = Image.fromarray(f.rgb)
-                swin_pred = detector.predict_frame_swin(pil_img)
-                if swin_pred is not None:
-                    p_ai = float(swin_pred)
-                else:
-                    det_res = detector.detect(pil_img)
-                    if det_res and det_res.probabilities:
-                        p_ai = float(det_res.probabilities.get("artificial", 0.5))
+                det_res = detector.detect(pil_img, is_video_frame=True)
+                if det_res and det_res.probabilities:
+                    p_ai = float(det_res.probabilities.get("artificial", 0.5))
             except Exception as e:
                 logger.warning("Spatial frame AI inference failed at %d: %s", idx, e)
 

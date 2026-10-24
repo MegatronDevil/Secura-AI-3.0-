@@ -2,11 +2,23 @@ import React, { useState, useEffect, useRef } from "react";
 import { LiveShieldFrameResponse } from "../types/api";
 import { sendStreamLivenessFrame } from "../services/api";
 
+export interface StrikeRecord {
+  strikeNumber: 1 | 2 | 3;
+  timestampUtc: string;
+  verdict: string;
+  syntheticConfidence: number;
+  triggerFrameSeq: number;
+  triggerRegionOrResolution: string;
+  suspicionFlags: string[];
+}
+
 interface WebcamDeepfakeShieldProps {
   onBackToOverview?: () => void;
 }
 
-type StreamMode = "webcam" | "screen" | "simulated";
+export type StreamMode = "webcam" | "screen" | "simulated";
+export type ScreeningLifecycleState = "IDLE" | "SCREENING_ACTIVE" | "PAUSED_STRIKE_2" | "TERMINATED_STRIKE_3";
+export type ActiveModalType = null | "STRIKE_1" | "STRIKE_2" | "STRIKE_3";
 
 export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBackToOverview }) => {
   const [streamMode, setStreamMode] = useState<StreamMode>("webcam");
@@ -16,12 +28,13 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
   const [pulseHistory, setPulseHistory] = useState<number[]>([]);
   const [fpsCounter, setFpsCounter] = useState<number>(0);
 
-  // Grace Period & Warning States
-  const [consecutiveStrikes, setConsecutiveStrikes] = useState<number>(0);
-  const [isGraceActive, setIsGraceActive] = useState<boolean>(false);
-  const [graceSecondsLeft, setGraceSecondsLeft] = useState<number>(10);
-  const [showWarningModal, setShowWarningModal] = useState<boolean>(false);
-  const [showLockdownModal, setShowLockdownModal] = useState<boolean>(false);
+  // 3-Strike Explicit State Machine & Audit History
+  const [screeningState, setScreeningState] = useState<ScreeningLifecycleState>("IDLE");
+  const [strikeCount, setStrikeCount] = useState<number>(0);
+  const [strikeHistory, setStrikeHistory] = useState<StrikeRecord[]>([]);
+  const [activeModal, setActiveModal] = useState<ActiveModalType>(null);
+  const [activeTriggerRecord, setActiveTriggerRecord] = useState<StrikeRecord | null>(null);
+  const [shieldStatus, setShieldStatus] = useState<string>("IDLE");
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -32,15 +45,22 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
   const frameCountRef = useRef<number>(0);
   const lastFpsTimeRef = useRef<number>(Date.now());
   const simAnimationRef = useRef<number>(0);
-  const graceTimerRef = useRef<number | null>(null);
-  const strikesRef = useRef<number>(0);
-  const isGraceActiveRef = useRef<boolean>(false);
+  const strikeCountRef = useRef<number>(0);
+  const screeningStateRef = useRef<ScreeningLifecycleState>("IDLE");
+  const cooldownUntilRef = useRef<number>(0);
+  const lastTriggeredFingerprintRef = useRef<Uint8Array | null>(null);
+  const frameSeqRef = useRef<number>(0);
+  const latestAppliedSeqRef = useRef<number>(0);
+  const lastSampledFingerprintRef = useRef<Uint8Array | null>(null);
 
   // Start real webcam stream
   const startCamera = async () => {
     stopStream();
     setCameraError(null);
     setStreamMode("webcam");
+    setScreeningState("SCREENING_ACTIVE");
+    screeningStateRef.current = "SCREENING_ACTIVE";
+    setShieldStatus("ANALYZING");
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error("Browser mediaDevices API not available.");
@@ -80,6 +100,9 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
       setCameraError(msg);
       isStreamingRef.current = false;
       setIsStreaming(false);
+      setScreeningState("IDLE");
+      screeningStateRef.current = "IDLE";
+      setShieldStatus("IDLE");
     }
   };
 
@@ -88,6 +111,9 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
     stopStream();
     setCameraError(null);
     setStreamMode("screen");
+    setScreeningState("SCREENING_ACTIVE");
+    screeningStateRef.current = "SCREENING_ACTIVE";
+    setShieldStatus("ANALYZING");
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
         throw new Error("Screen capture API not supported in this browser.");
@@ -128,6 +154,9 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
       }
       isStreamingRef.current = false;
       setIsStreaming(false);
+      setScreeningState("IDLE");
+      screeningStateRef.current = "IDLE";
+      setShieldStatus("IDLE");
     }
   };
 
@@ -136,6 +165,9 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
     stopStream();
     setCameraError(null);
     setStreamMode("simulated");
+    setScreeningState("SCREENING_ACTIVE");
+    screeningStateRef.current = "SCREENING_ACTIVE";
+    setShieldStatus("ANALYZING");
     isStreamingRef.current = true;
     setIsStreaming(true);
     scheduleNextFrame(50);
@@ -148,10 +180,6 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
       clearTimeout(loopTimeoutRef.current);
       loopTimeoutRef.current = null;
     }
-    if (graceTimerRef.current) {
-      clearInterval(graceTimerRef.current);
-      graceTimerRef.current = null;
-    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
@@ -160,10 +188,15 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
       videoRef.current.srcObject = null;
     }
     setIsStreaming(false);
-    setShowWarningModal(false);
-    setIsGraceActive(false);
-    isGraceActiveRef.current = false;
     setFpsCounter(0);
+    latestAppliedSeqRef.current = 0;
+    frameSeqRef.current = 0;
+    lastSampledFingerprintRef.current = null;
+    if (screeningStateRef.current !== "TERMINATED_STRIKE_3" && screeningStateRef.current !== "PAUSED_STRIKE_2") {
+      setScreeningState("IDLE");
+      screeningStateRef.current = "IDLE";
+      setShieldStatus("IDLE");
+    }
   };
 
   const scheduleNextFrame = (delayMs: number) => {
@@ -171,21 +204,22 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
     loopTimeoutRef.current = window.setTimeout(processFrameLoop, delayMs);
   };
 
-  // Adaptive processing loop: captures and analyzes frame sequentially without overlaps
+  // Adaptive processing loop: captures and analyzes frame sequentially with change-detection
   const processFrameLoop = async () => {
     if (!isStreamingRef.current) return;
     if (isSendingFrameRef.current) {
-      scheduleNextFrame(120);
+      scheduleNextFrame(100);
       return;
     }
 
     const canvas = canvasRef.current;
     if (!canvas) {
-      scheduleNextFrame(150);
+      scheduleNextFrame(120);
       return;
     }
 
     let blob: Blob | null = null;
+    let hasMeaningfulChange = true;
 
     if (streamMode === "simulated") {
       simAnimationRef.current++;
@@ -223,7 +257,7 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
     } else {
       const video = videoRef.current;
       if (!video || video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
-        scheduleNextFrame(150);
+        scheduleNextFrame(120);
         return;
       }
 
@@ -232,22 +266,70 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
       const ctx = canvas.getContext("2d");
       if (ctx) {
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // Screen share change-detection: compare low-res 64x48 thumbnail to avoid redundant ML calls
+        if (streamMode === "screen") {
+          try {
+            const miniCanvas = document.createElement("canvas");
+            miniCanvas.width = 64;
+            miniCanvas.height = 48;
+            const miniCtx = miniCanvas.getContext("2d");
+            if (miniCtx) {
+              miniCtx.drawImage(canvas, 0, 0, 64, 48);
+              const miniData = miniCtx.getImageData(0, 0, 64, 48).data;
+              if (lastSampledFingerprintRef.current && lastSampledFingerprintRef.current.length === miniData.length) {
+                let totalDiff = 0;
+                const prev = lastSampledFingerprintRef.current;
+                for (let i = 0; i < miniData.length; i += 4) {
+                  totalDiff += Math.abs(miniData[i] - prev[i]) + Math.abs(miniData[i+1] - prev[i+1]) + Math.abs(miniData[i+2] - prev[i+2]);
+                }
+                const avgDiff = totalDiff / (64 * 48 * 3);
+                if (avgDiff < 2.0 && livenessData != null) {
+                  hasMeaningfulChange = false;
+                }
+              }
+              lastSampledFingerprintRef.current = new Uint8Array(miniData);
+            }
+          } catch (diffErr) {
+            hasMeaningfulChange = true;
+          }
+        }
+
         blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
       }
     }
 
-    if (!blob || !isStreamingRef.current) {
-      scheduleNextFrame(150);
+    if (!hasMeaningfulChange) {
+      setShieldStatus("IDLE_NO_CHANGE");
+      scheduleNextFrame(100);
       return;
     }
 
+    if (!blob || !isStreamingRef.current) {
+      scheduleNextFrame(100);
+      return;
+    }
+
+    const currentSeq = ++frameSeqRef.current;
+    const captureTime = Date.now();
     isSendingFrameRef.current = true;
+    setShieldStatus("ANALYZING");
+
     try {
-      const res = await sendStreamLivenessFrame(blob, Date.now());
+      const res = await sendStreamLivenessFrame(blob, captureTime, currentSeq);
       if (isStreamingRef.current) {
-        setLivenessData(res);
-        if (res.rppg_pulse_estimate !== undefined && res.rppg_pulse_estimate !== null && res.rppg_pulse_estimate > 0) {
-          setPulseHistory((prev) => [...prev.slice(-28), res.rppg_pulse_estimate!]);
+        // Enforce monotonic ordering: discard if newer frame was already processed
+        if (res.frame_seq == null || res.frame_seq >= latestAppliedSeqRef.current) {
+          latestAppliedSeqRef.current = res.frame_seq || currentSeq;
+          setLivenessData(res);
+          setShieldStatus(
+            res.verdict === "DEEPFAKE_INJECTION_DETECTED"
+              ? "THREAT_DETECTED"
+              : "LIVE_AUTHENTIC"
+          );
+          if (res.rppg_pulse_estimate !== undefined && res.rppg_pulse_estimate !== null && res.rppg_pulse_estimate > 0) {
+            setPulseHistory((prev) => [...prev.slice(-28), res.rppg_pulse_estimate!]);
+          }
         }
 
         // Calculate actual FPS
@@ -259,23 +341,60 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
           lastFpsTimeRef.current = now;
         }
 
-        // Strike enforcement & grace timer management
-        const isSynthetic = res.verdict === "DEEPFAKE_INJECTION_DETECTED" || res.synthetic_confidence >= 0.55;
+        // Explicit 3-Strike Lifecycle Enforcement with Deduplication & Cooldown
+        const isSynthetic = res.verdict === "DEEPFAKE_INJECTION_DETECTED" || res.synthetic_confidence >= 0.65;
+
         if (isSynthetic) {
-          if (!isGraceActiveRef.current) {
-            strikesRef.current += 1;
-            setConsecutiveStrikes(strikesRef.current);
-            if (strikesRef.current >= 3) {
-              stopStream();
-              setShowLockdownModal(true);
-              return;
+          // Safeguard 1: Cooldown boundary (minimum 5s between strikes so static content doesn't trigger all 3)
+          const inCooldown = now < cooldownUntilRef.current;
+
+          // Safeguard 2: Visual deduplication - check difference from last triggered strike frame
+          let isDuplicateVisual = false;
+          if (lastSampledFingerprintRef.current && lastTriggeredFingerprintRef.current) {
+            let totalDiff = 0;
+            const cur = lastSampledFingerprintRef.current;
+            const prev = lastTriggeredFingerprintRef.current;
+            for (let i = 0; i < Math.min(cur.length, prev.length); i += 4) {
+              totalDiff += Math.abs(cur[i] - prev[i]) + Math.abs(cur[i+1] - prev[i+1]) + Math.abs(cur[i+2] - prev[i+2]);
             }
-            setShowWarningModal(true);
+            const avgDiff = totalDiff / ((Math.min(cur.length, prev.length) / 4) * 3);
+            if (avgDiff < 3.5) {
+              isDuplicateVisual = true;
+            }
           }
-        } else {
-          if (!isGraceActiveRef.current && strikesRef.current > 0 && frameCountRef.current % 12 === 0) {
-            strikesRef.current = Math.max(0, strikesRef.current - 1);
-            setConsecutiveStrikes(strikesRef.current);
+
+          // A strike requires an active screening session, no modal currently blocking, and passing safeguards
+          if (!inCooldown && !isDuplicateVisual && activeModal === null && screeningStateRef.current === "SCREENING_ACTIVE") {
+            const nextStrike = Math.min(3, strikeCountRef.current + 1) as 1 | 2 | 3;
+            strikeCountRef.current = nextStrike;
+            setStrikeCount(nextStrike);
+
+            const triggerRecord: StrikeRecord = {
+              strikeNumber: nextStrike,
+              timestampUtc: new Date().toISOString(),
+              verdict: res.verdict,
+              syntheticConfidence: res.synthetic_confidence,
+              triggerFrameSeq: res.frame_seq || currentSeq,
+              triggerRegionOrResolution: `${canvas.width} × ${canvas.height} px (${streamMode})`,
+              suspicionFlags: res.suspicion_flags && res.suspicion_flags.length > 0
+                ? res.suspicion_flags
+                : ["Neural spatial diffusion anomaly detected in active stream"]
+            };
+
+            setStrikeHistory((prev) => [...prev, triggerRecord]);
+            setActiveTriggerRecord(triggerRecord);
+            cooldownUntilRef.current = now + 5000; // 5-second deduplication cooldown
+            if (lastSampledFingerprintRef.current) {
+              lastTriggeredFingerprintRef.current = new Uint8Array(lastSampledFingerprintRef.current);
+            }
+
+            if (nextStrike === 1) {
+              setActiveModal("STRIKE_1");
+            } else if (nextStrike === 2) {
+              setActiveModal("STRIKE_2");
+            } else if (nextStrike === 3) {
+              setActiveModal("STRIKE_3");
+            }
           }
         }
       }
@@ -289,25 +408,57 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
     }
   };
 
-  // User clicks [ OK — I'm Closing It ]
-  const acknowledgeWarning = () => {
-    setShowWarningModal(false);
-    setIsGraceActive(true);
-    isGraceActiveRef.current = true;
-    setGraceSecondsLeft(10);
+  // ---------------------------------------------------------------------------
+  // THREE-STRIKE ACTION HANDLERS (Section 7 Specification)
+  // ---------------------------------------------------------------------------
 
-    if (graceTimerRef.current) clearInterval(graceTimerRef.current);
-    let left = 10;
-    graceTimerRef.current = window.setInterval(() => {
-      left -= 1;
-      setGraceSecondsLeft(left);
-      if (left <= 0) {
-        if (graceTimerRef.current) clearInterval(graceTimerRef.current);
-        graceTimerRef.current = null;
-        setIsGraceActive(false);
-        isGraceActiveRef.current = false;
-      }
-    }, 1000);
+  // Strike 1: User clicks [ OK / Continue Screening ]
+  const handleAcknowledgeStrike1 = () => {
+    setActiveModal(null);
+    cooldownUntilRef.current = Date.now() + 5000; // 5s cooldown
+    setScreeningState("SCREENING_ACTIVE");
+    screeningStateRef.current = "SCREENING_ACTIVE";
+  };
+
+  // Strike 2: User clicks [ OK / Pause Active Session ]
+  const handlePauseStrike2 = () => {
+    setActiveModal(null);
+    setScreeningState("PAUSED_STRIKE_2");
+    screeningStateRef.current = "PAUSED_STRIKE_2";
+    setShieldStatus("PAUSED_ON_STRIKE_2");
+  };
+
+  // Strike 2: User clicks [ Resume Screening Session ]
+  const handleResumeStrike2 = () => {
+    setActiveModal(null);
+    cooldownUntilRef.current = Date.now() + 6000;
+    setScreeningState("SCREENING_ACTIVE");
+    screeningStateRef.current = "SCREENING_ACTIVE";
+    setShieldStatus("LIVE_AUTHENTIC");
+    scheduleNextFrame(100);
+  };
+
+  // Strike 3: User clicks [ Acknowledge & Terminate Session ]
+  const handleTerminateStrike3 = () => {
+    setActiveModal(null);
+    setScreeningState("TERMINATED_STRIKE_3");
+    screeningStateRef.current = "TERMINATED_STRIKE_3";
+    setShieldStatus("TERMINATED");
+    stopStream();
+  };
+
+  // Explicit session reset (Reset button)
+  const handleResetSession = () => {
+    strikeCountRef.current = 0;
+    setStrikeCount(0);
+    setStrikeHistory([]);
+    setActiveModal(null);
+    setActiveTriggerRecord(null);
+    lastTriggeredFingerprintRef.current = null;
+    cooldownUntilRef.current = 0;
+    setScreeningState("IDLE");
+    screeningStateRef.current = "IDLE";
+    setShieldStatus("IDLE");
   };
 
   useEffect(() => {
@@ -322,8 +473,6 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
   const pulse =
     livenessData?.rppg_pulse_estimate !== undefined && livenessData.rppg_pulse_estimate !== null && livenessData.rppg_pulse_estimate > 0
       ? livenessData.rppg_pulse_estimate.toFixed(1)
-      : isStreaming
-      ? "72.0"
       : "—";
 
   return (
@@ -344,11 +493,11 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           {onBackToOverview && (
             <button
               onClick={onBackToOverview}
-              className="px-3.5 py-2 rounded-xl bg-white border border-[#D5C9B3] text-[#2A2521] text-xs font-semibold hover:bg-[#F7F2E6] transition-colors"
+              className="px-3 py-2 rounded-xl bg-white border border-[#D5C9B3] text-[#2A2521] text-xs font-semibold hover:bg-[#F7F2E6] transition-colors"
             >
               &larr; Overview
             </button>
@@ -357,26 +506,26 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
           {isStreaming ? (
             <button
               onClick={stopStream}
-              className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs transition-colors flex items-center gap-2 shadow-sm"
+              className="px-4 sm:px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs transition-colors flex items-center gap-2 shadow-sm"
             >
               <span className="material-symbols-outlined text-base">stop_screen_share</span>
               <span>Disarm Sentinel</span>
             </button>
           ) : (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={startScreenShare}
-                className="px-4 py-2.5 rounded-xl bg-[#2A2521] hover:bg-[#1A1614] text-white font-bold text-xs transition-colors flex items-center gap-1.5 shadow-sm"
-              >
-                <span className="material-symbols-outlined text-base text-[#38bdf8]">screen_share</span>
-                <span>Share Screen</span>
-              </button>
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={startCamera}
-                className="px-4 py-2.5 rounded-xl bg-[#D9651E] hover:bg-[#C25816] text-white font-bold text-xs transition-colors flex items-center gap-1.5 shadow-sm"
+                className="px-3.5 sm:px-4 py-2.5 rounded-xl bg-[#D9651E] hover:bg-[#C25816] text-white font-bold text-xs transition-colors flex items-center gap-1.5 shadow-sm"
               >
                 <span className="material-symbols-outlined text-base">videocam</span>
                 <span>Start Webcam</span>
+              </button>
+              <button
+                onClick={startScreenShare}
+                className="hidden sm:flex items-center gap-1.5 px-3.5 sm:px-4 py-2.5 rounded-xl bg-[#2A2521] hover:bg-[#1A1614] text-white font-bold text-xs transition-colors shadow-sm"
+              >
+                <span className="material-symbols-outlined text-base text-[#38bdf8]">screen_share</span>
+                <span>Share Screen</span>
               </button>
               <button
                 onClick={startSimulatedFeed}
@@ -391,22 +540,11 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
         </div>
       </div>
 
-      {/* Stream Mode Switcher Tabs */}
-      <div className="flex items-center gap-2 border-b border-[#E8DFCF] pb-2">
-        <button
-          onClick={startScreenShare}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-            streamMode === "screen" && isStreaming
-              ? "bg-[#2A2521] text-white shadow-xs"
-              : "text-[#6C6357] hover:bg-[#FAF7EE]"
-          }`}
-        >
-          <span className="material-symbols-outlined text-sm">desktop_windows</span>
-          <span>Desktop Screen Share</span>
-        </button>
+      {/* Stream Mode Switcher Tabs - responsive horizontal scroll on mobile */}
+      <div className="flex items-center gap-2 border-b border-[#E8DFCF] pb-2 overflow-x-auto no-scrollbar max-w-full touch-pan-x">
         <button
           onClick={startCamera}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap shrink-0 ${
             streamMode === "webcam" && isStreaming
               ? "bg-[#D9651E] text-white shadow-xs"
               : "text-[#6C6357] hover:bg-[#FAF7EE]"
@@ -416,8 +554,19 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
           <span>Webcam Biometrics</span>
         </button>
         <button
+          onClick={startScreenShare}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap shrink-0 ${
+            streamMode === "screen" && isStreaming
+              ? "bg-[#2A2521] text-white shadow-xs"
+              : "text-[#6C6357] hover:bg-[#FAF7EE]"
+          }`}
+        >
+          <span className="material-symbols-outlined text-sm">desktop_windows</span>
+          <span>Desktop Screen Share</span>
+        </button>
+        <button
           onClick={startSimulatedFeed}
-          className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap shrink-0 ${
             streamMode === "simulated" && isStreaming
               ? "bg-[#6C6357] text-white shadow-xs"
               : "text-[#6C6357] hover:bg-[#FAF7EE]"
@@ -460,7 +609,7 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
               {isStreaming && (
                 <span className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-mono font-bold">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-ping"></span>
-                  {streamMode.toUpperCase()} STREAM {fpsCounter > 0 ? `(${fpsCounter} FPS)` : ""}
+                  {streamMode.toUpperCase()} STREAM {fpsCounter > 0 ? `(${fpsCounter} FPS)` : ""} &bull; {shieldStatus}
                 </span>
               )}
             </div>
@@ -497,31 +646,56 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
             {/* Placeholder when stream is inactive */}
             {!isStreaming && (
               <div className="text-center p-8 space-y-3">
-                <div className="w-16 h-16 rounded-2xl bg-[#2A2521] text-[#E8DFCF] flex items-center justify-center mx-auto">
-                  <span className="material-symbols-outlined text-3xl">desktop_windows</span>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-sm font-semibold text-white">Stream Sentinel Inactive</p>
-                  <p className="text-xs text-[#9E9385] max-w-sm">
-                    Select "Share Screen" to inspect shared tabs/windows in real time, or "Start Webcam" for facial biometric verification.
-                  </p>
-                </div>
-                <div className="flex items-center justify-center gap-3 pt-2">
-                  <button
-                    onClick={startScreenShare}
-                    className="px-4 py-2 rounded-xl bg-[#2A2521] hover:bg-[#1A1614] text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
-                  >
-                    <span className="material-symbols-outlined text-sm text-[#38bdf8]">screen_share</span>
-                    <span>Share Screen</span>
-                  </button>
-                  <button
-                    onClick={startCamera}
-                    className="px-4 py-2 rounded-xl bg-[#D9651E] hover:bg-[#C25816] text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
-                  >
-                    <span className="material-symbols-outlined text-sm">videocam</span>
-                    <span>Start Webcam</span>
-                  </button>
-                </div>
+                {screeningState === "TERMINATED_STRIKE_3" ? (
+                  <>
+                    <div className="w-16 h-16 rounded-2xl bg-red-500/20 text-red-400 flex items-center justify-center mx-auto border border-red-500/30">
+                      <span className="material-symbols-outlined text-3xl">gpp_bad</span>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-bold text-red-400">Screening Session Terminated</p>
+                      <p className="text-xs text-slate-300 max-w-sm mx-auto">
+                        In accordance with automated defense policy, 3 confirmed synthetic media events triggered complete stream termination and hardware release.
+                      </p>
+                    </div>
+                    <div className="pt-2">
+                      <button
+                        onClick={handleResetSession}
+                        className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold transition-all shadow-md flex items-center gap-1.5 mx-auto cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-sm">restart_alt</span>
+                        <span>Start New Session (Reset Strikes)</span>
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-16 h-16 rounded-2xl bg-[#2A2521] text-[#E8DFCF] flex items-center justify-center mx-auto">
+                      <span className="material-symbols-outlined text-3xl">desktop_windows</span>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-white">Stream Sentinel Inactive</p>
+                      <p className="text-xs text-[#9E9385] max-w-sm">
+                        Select "Share Screen" to inspect shared tabs/windows in real time, or "Start Webcam" for facial biometric verification.
+                      </p>
+                    </div>
+                    <div className="flex items-center justify-center gap-3 pt-2">
+                      <button
+                        onClick={startScreenShare}
+                        className="px-4 py-2 rounded-xl bg-[#2A2521] hover:bg-[#1A1614] text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
+                      >
+                        <span className="material-symbols-outlined text-sm text-[#38bdf8]">screen_share</span>
+                        <span>Share Screen</span>
+                      </button>
+                      <button
+                        onClick={startCamera}
+                        className="px-4 py-2 rounded-xl bg-[#D9651E] hover:bg-[#C25816] text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
+                      >
+                        <span className="material-symbols-outlined text-sm">videocam</span>
+                        <span>Start Webcam</span>
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -564,44 +738,167 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
                 </div>
 
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-black/80 backdrop-blur-md text-white font-mono text-[11px] border border-white/10">
-                  <span className="material-symbols-outlined text-xs text-rose-400 animate-pulse">
-                    favorite
+                  <span className="material-symbols-outlined text-xs text-rose-400">
+                    sensors
                   </span>
-                  <span>{pulse} BPM</span>
+                  <span>{pulse !== "—" ? `${pulse} BPM (rPPG)` : "Chromatic Analysis"}</span>
                 </div>
               </div>
             )}
 
-            {/* Apple-style Grace HUD pill when OK is clicked */}
-            {isGraceActive && (
-              <div className="absolute top-4 inset-x-4 flex items-center justify-center pointer-events-none z-30 animate-fade-in">
-                <div className="px-4 py-2 rounded-full bg-slate-900/85 backdrop-blur-xl border border-white/20 text-white shadow-2xl flex items-center gap-3">
-                  <div className="w-5 h-5 rounded-full border-2 border-sky-400 border-t-transparent animate-spin"></div>
-                  <span className="text-xs font-semibold font-mono text-sky-300">
-                    Grace Active: Close AI Window in [ {graceSecondsLeft}s ]
-                  </span>
+            {/* Paused on Strike 2 Banner Overlay */}
+            {screeningState === "PAUSED_STRIKE_2" && (
+              <div className="absolute inset-0 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center p-6 z-40 text-center space-y-4 animate-fade-in">
+                <div className="w-14 h-14 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-3xl">
+                  ⏸️
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Screening Session Paused (Strike 2)</h3>
+                  <p className="text-xs text-slate-300 mt-1 max-w-sm mx-auto">
+                    Active scanning is paused following Strike 2. You may remove or close the synthetic media window, then resume screening.
+                  </p>
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleResumeStrike2}
+                    className="px-5 py-2.5 rounded-xl bg-[#D9651E] hover:bg-[#C25816] text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5"
+                  >
+                    <span className="material-symbols-outlined text-sm">play_arrow</span>
+                    <span>Resume Screening (Strike Count: 2)</span>
+                  </button>
+                  <button
+                    onClick={handleResetSession}
+                    className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold text-xs transition-colors"
+                  >
+                    Reset Session
+                  </button>
                 </div>
               </div>
             )}
 
-            {/* Interactive Threat Warning Modal */}
-            {showWarningModal && (
+            {/* STRIKE 1 WARNING MODAL */}
+            {activeModal === "STRIKE_1" && activeTriggerRecord && (
               <div className="absolute inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-6 z-40 animate-fade-in">
-                <div className="bg-slate-900 border border-red-500/60 rounded-2xl p-6 max-w-sm w-full text-center space-y-4 shadow-2xl">
-                  <div className="w-12 h-12 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center mx-auto text-2xl">
+                <div className="bg-slate-900 border border-amber-500/80 rounded-2xl p-6 max-w-md w-full text-center space-y-4 shadow-2xl">
+                  <div className="w-12 h-12 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mx-auto text-2xl">
                     ⚠️
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-white">AI Content Detected</h3>
+                    <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-amber-400 px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30">
+                      Security Warning • Strike 1 of 3
+                    </span>
+                    <h3 className="text-base font-bold text-white mt-2">Synthetic AI Content Detected</h3>
                     <p className="text-xs text-slate-300 mt-1">
-                      Synthetic deepfake artifacts were detected on the active stream (Strike {consecutiveStrikes}/3).
+                      Generative neural diffusion patterns were detected on the active stream with{" "}
+                      <strong>{(activeTriggerRecord.syntheticConfidence * 100).toFixed(1)}% confidence</strong>.
                     </p>
+                    <div className="mt-3 p-2.5 rounded-lg bg-black/50 border border-white/10 text-left text-[11px] font-mono text-slate-300 space-y-1">
+                      <div>Trigger: Frame #{activeTriggerRecord.triggerFrameSeq} ({activeTriggerRecord.triggerRegionOrResolution})</div>
+                      <div className="text-amber-300">Flag: {activeTriggerRecord.suspicionFlags[0]}</div>
+                    </div>
                   </div>
                   <button
-                    onClick={acknowledgeWarning}
-                    className="w-full py-2.5 px-4 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs transition-all shadow-md"
+                    onClick={handleAcknowledgeStrike1}
+                    className="w-full py-2.5 px-4 rounded-xl bg-[#D9651E] hover:bg-[#C25816] text-white font-bold text-xs transition-all shadow-md cursor-pointer"
                   >
-                    OK — Close AI Window
+                    OK / Continue Screening
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* STRIKE 2 WARNING MODAL */}
+            {activeModal === "STRIKE_2" && activeTriggerRecord && (
+              <div className="absolute inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-6 z-40 animate-fade-in">
+                <div className="bg-slate-900 border border-rose-500/80 rounded-2xl p-6 max-w-md w-full text-center space-y-4 shadow-2xl">
+                  <div className="w-12 h-12 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto text-2xl">
+                    🛑
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-rose-400 px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/30">
+                      Defense Intervention • Strike 2 of 3
+                    </span>
+                    <h3 className="text-base font-bold text-white mt-2">Second Confirmed AI Detection</h3>
+                    <p className="text-xs text-slate-300 mt-1">
+                      A distinct second generative media event was detected. As specified by product policy, you may pause active screening or acknowledge and resume.
+                    </p>
+
+                    {/* Strike History Log */}
+                    <div className="mt-3 p-2.5 rounded-lg bg-black/50 border border-white/10 text-left text-[10px] font-mono text-slate-300 space-y-1.5">
+                      <div className="font-bold text-white uppercase">Session Strike History:</div>
+                      {strikeHistory.map((s, idx) => (
+                        <div key={idx} className="flex justify-between text-slate-400">
+                          <span>Strike {s.strikeNumber}: Frame #{s.triggerFrameSeq}</span>
+                          <span className="text-rose-400">{(s.syntheticConfidence * 100).toFixed(0)}% AI</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handlePauseStrike2}
+                      className="flex-1 py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs transition-all border border-white/10"
+                    >
+                      OK / Pause Active Session
+                    </button>
+                    <button
+                      onClick={handleResumeStrike2}
+                      className="flex-1 py-2.5 px-3 rounded-xl bg-[#D9651E] hover:bg-[#C25816] text-white font-bold text-xs transition-all shadow-md"
+                    >
+                      Resume Screening
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* STRIKE 3 LOCKDOWN AUDIT MODAL */}
+            {activeModal === "STRIKE_3" && activeTriggerRecord && (
+              <div className="absolute inset-0 bg-black/90 backdrop-blur-md flex items-center justify-center p-6 z-40 animate-fade-in">
+                <div className="bg-slate-900 border border-red-500 rounded-2xl p-6 max-w-lg w-full text-center space-y-4 shadow-2xl">
+                  <div className="w-12 h-12 rounded-full bg-red-500/20 text-red-500 flex items-center justify-center mx-auto text-2xl">
+                    🛡️
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-red-400 px-2 py-0.5 rounded bg-red-500/10 border border-red-500/30">
+                      Automated Defense Intervention • Strike 3 of 3
+                    </span>
+                    <h3 className="text-base font-bold text-white mt-2">Maximum Threat Threshold Reached</h3>
+                    <p className="text-xs text-slate-300 mt-1">
+                      Three verified synthetic AI events were detected on the active stream. In accordance with Secura AI automated defense policy, your stream session will now be terminated and hardware capture streams released.
+                    </p>
+
+                    {/* Full 3-Strike Audit Table */}
+                    <div className="mt-3 p-3 rounded-lg bg-black/60 border border-white/10 text-left text-[11px] font-mono text-slate-300 space-y-2 max-h-48 overflow-y-auto">
+                      <div className="font-bold text-white uppercase text-[10px] tracking-wider border-b border-white/10 pb-1">
+                        Incident Audit Trail ({strikeHistory.length} Recorded Strikes)
+                      </div>
+                      {strikeHistory.map((s, idx) => (
+                        <div key={idx} className="p-2 rounded bg-white/5 border border-white/5 space-y-0.5">
+                          <div className="flex justify-between font-bold">
+                            <span className="text-red-400">Strike {s.strikeNumber} — Frame #{s.triggerFrameSeq}</span>
+                            <span className="text-white">{(s.syntheticConfidence * 100).toFixed(1)}% AI</span>
+                          </div>
+                          <div className="text-[10px] text-slate-400 flex justify-between">
+                            <span>{s.triggerRegionOrResolution}</span>
+                            <span>{new Date(s.timestampUtc).toLocaleTimeString()}</span>
+                          </div>
+                          {s.suspicionFlags && s.suspicionFlags.length > 0 && (
+                            <div className="text-[10px] text-amber-300 truncate">
+                              Flag: {s.suspicionFlags[0]}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleTerminateStrike3}
+                    className="w-full py-3 px-4 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs transition-all shadow-lg cursor-pointer"
+                  >
+                    Acknowledge &amp; Terminate Session
                   </button>
                 </div>
               </div>
@@ -625,7 +922,26 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
               </span>
             </div>
             <div className="text-[11px] text-[#8A7E70]">
-              Sentinel Status: <strong className="text-emerald-700">ARMED (STRIKES: {consecutiveStrikes}/3)</strong>
+              Sentinel Status:{" "}
+              <strong
+                className={
+                  screeningState === "SCREENING_ACTIVE"
+                    ? "text-emerald-700"
+                    : screeningState === "PAUSED_STRIKE_2"
+                    ? "text-amber-700"
+                    : screeningState === "TERMINATED_STRIKE_3"
+                    ? "text-rose-700"
+                    : "text-[#70675D]"
+                }
+              >
+                {screeningState === "SCREENING_ACTIVE"
+                  ? `ARMED (STRIKES: ${strikeCount}/3)`
+                  : screeningState === "PAUSED_STRIKE_2"
+                  ? "PAUSED (STRIKES: 2/3)"
+                  : screeningState === "TERMINATED_STRIKE_3"
+                  ? "TERMINATED (STRIKES: 3/3)"
+                  : "STANDBY (IDLE)"}
+              </strong>
             </div>
           </div>
         </div>
@@ -707,7 +1023,7 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
                 <h3 className="font-bold text-sm text-[#2A2521]">rPPG Pulse Waveform Monitor</h3>
               </div>
               <span className="text-xs font-mono font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
-                {pulse} BPM
+                {pulse !== "—" ? `${pulse} BPM (Est)` : "Signal Standby"}
               </span>
             </div>
 
@@ -756,29 +1072,6 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
           </div>
         </div>
       </div>
-
-      {/* Fullscreen Lockdown Modal */}
-      {showLockdownModal && (
-        <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-2xl flex items-center justify-center p-6 animate-fade-in">
-          <div className="bg-slate-900 border border-red-500/80 rounded-3xl p-8 max-w-lg w-full text-center space-y-5 shadow-2xl">
-            <div className="w-16 h-16 rounded-full bg-red-500/20 text-red-500 flex items-center justify-center mx-auto text-3xl">
-              🛡️
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-white tracking-tight">Security Intervention Triggered</h2>
-              <p className="text-xs text-slate-300 mt-2 leading-relaxed">
-                3 consecutive synthetic AI injection attempts were detected in the active stream. In accordance with Secura AI automated defense policy, your stream has been terminated immediately.
-              </p>
-            </div>
-            <button
-              onClick={() => setShowLockdownModal(false)}
-              className="w-full py-3 px-6 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs transition-all shadow-lg"
-            >
-              Acknowledge &amp; Reset Sentinel
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

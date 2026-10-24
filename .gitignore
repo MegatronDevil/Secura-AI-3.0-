@@ -1,4 +1,4 @@
-# Python
+# Python Runtimes & Caches
 __pycache__/
 *.py[cod]
 *$py.class
@@ -27,14 +27,29 @@ dist-ssr/
 *.pem
 *.key
 
-# Heavy Model Weights & Pre-trained Checkpoints (Exceed GitHub 100MB file limit)
-backend/models/weights/**
-models/weights/**
+# Heavy Foundation Models & Pre-trained Checkpoints (>100MB)
 *.safetensors
 *.bin
 *.onnx
+backend/models/weights/clip-vit-large-patch14/
+backend/models/weights/swin-ai-image-detector/
+backend/models/weights/all-MiniLM-L6-v2/
 
-# Large Media & Benchmark Recordings
+# Explicitly Allow Lightweight Custom Probe Checkpoints (<1MB)
+!backend/models/weights/fc_weights.pth
+!backend/models/weights/custom_fc_weights.pth
+!backend/models/weights/clip_domain_projections.npz
+!backend/models/weights/weights_manifest.json
+!backend/models/weights/restrav_temporal/
+!backend/models/weights/restrav_temporal/**
+!backend/models/weights/extension_image_detector_v1/
+!backend/models/weights/extension_image_detector_v1/**
+
+# Executables & Cloud Tools
+cloudflared.exe
+*.exe
+
+# Large Media, Benchmark Videos & Temporary Uploads
 data/
 uploads/
 *.mp4
@@ -44,6 +59,7 @@ uploads/
 
 # Backups & Scratch
 .backup_*
+backend/models/weights_backup_*/
 *.bak
 scratch/
 

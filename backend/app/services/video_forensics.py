@@ -14,13 +14,14 @@ def analyze_video_stream(
     sample_interval_sec: float = 0.5,
     max_samples: int = 32,
     preset: str = "fast",
+    acquisition_url: str = None,
 ) -> VideoForensicResult:
     """Main entrypoint for multi-layer video forensic analysis.
     
     Delegates to VideoForensicsOrchestrator while preserving exact function signature.
     """
     orchestrator = VideoForensicsOrchestrator(preset=preset)
-    return orchestrator.analyze(video_bytes=video_bytes, filename=filename)
+    return orchestrator.analyze(video_bytes=video_bytes, filename=filename, acquisition_url=acquisition_url)
 
 def extract_single_video_frame(
     video_bytes: bytes,

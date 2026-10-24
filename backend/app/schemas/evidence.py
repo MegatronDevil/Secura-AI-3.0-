@@ -182,6 +182,12 @@ class CameraMetadata(BaseModel):
     date_time_modified: Optional[str] = Field(default=None, description="Image modification timestamp string")
     offset_time: Optional[str] = Field(default=None, description="EXIF OffsetTime / UTC timezone offset if explicitly recorded")
     metadata_dimensions: Optional[Dict[str, int]] = Field(default=None, description="Dimensions recorded in EXIF (ExifImageWidth, ExifImageHeight)")
+    is_ai_metadata_present: bool = Field(default=False, description="Whether container metadata, PNG text chunks, or XMP packets confirm generative AI synthesis")
+    ai_generation_engine: Optional[str] = Field(default=None, description="Identified generative AI engine or pipeline (e.g. Stable Diffusion, ComfyUI, DALL-E, Midjourney)")
+    ai_prompt: Optional[str] = Field(default=None, description="Extracted generation prompt or description if found in metadata")
+    ai_parameters: Optional[Dict[str, Any]] = Field(default=None, description="Structured generative parameters (steps, sampler, seed, cfg, etc.)")
+    is_scientific_software_present: bool = Field(default=False, description="Whether authentic code-based plotting/charting software was identified")
+    scientific_software_name: Optional[str] = Field(default=None, description="Identified scientific plotting engine (e.g. Matplotlib, MATLAB, Gnuplot, Cairo)")
 
 
 class GPSMetadataSummary(BaseModel):
@@ -309,8 +315,8 @@ class AIDetectorResult(BaseModel):
     model_name: str = Field(default='UniversalFakeDetect CVPR 2023', description='Identity of the selected detector')
     model_version: str = Field(default='1.0.0-cvpr2023', description='Model architecture or revision identifier')
     model_status: AIDetectionStatus = Field(..., description='Operational status of the detector')
-    raw_score: Optional[float] = Field(default=None, description='Uncalibrated model output logit z')
-    uncalibrated_margin: Optional[float] = Field(default=None, description='Sigmoid margin in [0, 1]; not a calibrated probability')
+    raw_score: Optional[float] = Field(default=None, description='Uncalibrated model output logit z (range (-inf, +inf))')
+    uncalibrated_margin: Optional[float] = Field(default=None, ge=0.0, le=1.0, description='Sigmoid margin strictly in [0.0, 1.0]; not an unbounded logit')
     score_semantics: str = Field(..., description='Documented mathematical meaning of the raw score')
     predicted_class: Optional[str] = Field(default=None, description='Model output class: artificial vs human')
     decision_status: AIDetectionDecision = Field(..., description='Cautious decision classification based on model output')
@@ -392,9 +398,123 @@ class SynthIDProvenanceResult(BaseModel):
     audit_notes: List[str] = Field(default_factory=list, description="Forensic provenance audit notes")
 
 
+class MetadataFieldStatus(str, Enum):
+    VERIFIED = "VERIFIED"
+    PRESENT_UNVERIFIED = "PRESENT_UNVERIFIED"
+    INFERRED = "INFERRED"
+    CONFLICTING = "CONFLICTING"
+    NOT_AVAILABLE = "NOT_AVAILABLE"
+    EXTRACTION_FAILED = "EXTRACTION_FAILED"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+class ProvenanceVerificationStatus(str, Enum):
+    VERIFIED = "VERIFIED"
+    PRESENT_UNVERIFIED = "PRESENT_UNVERIFIED"
+    INFERRED = "INFERRED"
+    CONFLICTING = "CONFLICTING"
+    NOT_AVAILABLE = "NOT_AVAILABLE"
+    EXTRACTION_FAILED = "EXTRACTION_FAILED"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
+
+    # Legacy aliases for backwards compatibility
+    PARTIAL_EVIDENCE = "PRESENT_UNVERIFIED"
+    UNKNOWN = "NOT_AVAILABLE"
+
+
+class ProvenanceFieldEntry(BaseModel):
+    value: Optional[str] = Field(default=None, description="Extracted value or standardized unavailable notice")
+    status: MetadataFieldStatus = Field(default=MetadataFieldStatus.NOT_AVAILABLE, description="Mandatory metadata state")
+    source: str = Field(default="Container Metadata", description="Source of the field (e.g. EXIF, XMP, IPTC, C2PA, MP4 Box, Ingestion Pipeline)")
+    extraction_method: str = Field(default="Binary Header Inspection", description="Method utilized to obtain the field")
+    evidence_notes: Optional[str] = Field(default=None, description="Explanation or evidentiary limitations regarding this field")
+
+
+class ProvenanceRecord(BaseModel):
+    analysis_id: str = Field(..., description="Unique analysis record identifier")
+    input_sha256: str = Field(..., description="Cryptographic SHA-256 hash of exact input payload bytes (Data integrity check, not authorship proof)")
+    file_name: str = Field(..., description="Declared input filename or identifier")
+    file_size_bytes: int = Field(..., description="Input byte size")
+    detected_mime: str = Field(..., description="Verified container MIME format")
+    analysis_timestamp_utc: str = Field(..., description="ISO 8601 UTC timestamp of analysis")
+
+    # 8 Canonical Provenance Dimensions (Mandated by Secura Forensic Specification)
+    dim_original_capture_device: Optional[ProvenanceFieldEntry] = Field(
+        default=None,
+        description="1. Original capture device (e.g., camera make/model from EXIF/atoms; NOT_AVAILABLE if absent)"
+    )
+    dim_original_capture_location: Optional[ProvenanceFieldEntry] = Field(
+        default=None,
+        description="2. Original capture location (e.g., GPS coordinates if present in container; NOT_AVAILABLE if absent)"
+    )
+    dim_original_creation_timestamp: Optional[ProvenanceFieldEntry] = Field(
+        default=None,
+        description="3. Original creation timestamp (e.g., DateTimeOriginal from EXIF or container creation time)"
+    )
+    dim_original_creator: Optional[ProvenanceFieldEntry] = Field(
+        default=None,
+        description="4. Original creator or authoring application (e.g., IPTC byline, C2PA claim generator, software tag)"
+    )
+    dim_acquisition_source: Optional[ProvenanceFieldEntry] = Field(
+        default=None,
+        description="5. Acquisition source (e.g., known webpage URL, local upload, or browser download)"
+    )
+    dim_transfer_history: Optional[ProvenanceFieldEntry] = Field(
+        default=None,
+        description="6. Transfer history (e.g., observed steps of transfers, edits, recompression, or metadata stripping)"
+    )
+    dim_current_analysis_environment: Optional[ProvenanceFieldEntry] = Field(
+        default=None,
+        description="7. Current analysis device and software (Audit Workstation Environment, explicitly separated from media origin)"
+    )
+    dim_provenance_verification_status: Optional[ProvenanceFieldEntry] = Field(
+        default=None,
+        description="8. Provenance verification status synthesis across all fields"
+    )
+
+    # Legacy flattened fields for backwards compatibility
+    original_capture_location: str = Field(
+        default="Original capture location unavailable from this file",
+        description="Verified location where media was recorded, only if supported by trustworthy evidence"
+    )
+    capture_device: str = Field(
+        default="Capture device unavailable from container metadata",
+        description="Camera, phone or recording device, if identifiable from EXIF hardware tags"
+    )
+    original_creation_timestamp: Optional[str] = Field(
+        default=None,
+        description="Extracted original creation timestamp from container if present"
+    )
+    original_creator: str = Field(
+        default="Original creator or application unavailable",
+        description="Creator name or application identifier only when supported by IPTC/XMP/C2PA"
+    )
+    acquisition_source: str = Field(
+        default="Local file upload",
+        description="Where Secura AI obtained the file: local upload, browser URL, messaging download, etc."
+    )
+    transfer_history: List[str] = Field(
+        default_factory=list,
+        description="Observed steps of transfers, edits, recompression, or metadata stripping"
+    )
+    current_file_location: str = Field(
+        default="Ephemeral processing buffer",
+        description="Analysis copy location"
+    )
+    verification_status: ProvenanceVerificationStatus = Field(
+        default=ProvenanceVerificationStatus.NOT_AVAILABLE,
+        description="Verified, supported by partial evidence, inferred, conflicting, or unknown"
+    )
+
+    # C2PA & Cryptographic Credentials Summary
+    c2pa_status: str = Field(default="ABSENT", description="C2PA manifest state: VALID, INVALID, UNVERIFIABLE, ABSENT")
+    c2pa_signer: Optional[str] = Field(default=None, description="Cryptographic issuer identity if valid")
+    provenance_notes: List[str] = Field(default_factory=list, description="Forensic notes detailing verification limitations")
+
+
 class CanonicalBinaryVerdict(BaseModel):
-    predicted_label: str = Field(..., description="Canonical binary decision label: 'AI_GENERATED' or 'NOT_AI_GENERATED'")
-    display_label: str = Field(..., description="Consumer headline display label: 'AI GENERATED' or 'NOT AI GENERATED'")
+    predicted_label: str = Field(..., description="Canonical decision label: 'AI_GENERATED', 'CAMERA_CAPTURED', 'NOT_AI_GENERATED', or 'INCONCLUSIVE'")
+    display_label: str = Field(..., description="Consumer headline display label")
     model_score: float = Field(..., description="Numeric model output score [0.0 - 1.0] with documented semantics")
     calibrated_probability: Optional[float] = Field(default=None, description="Empirically validated calibrated probability; null if calibration is not demonstrated")
     decision_threshold: float = Field(default=0.50, description="Calibrated or operational decision threshold applied")
@@ -423,6 +543,8 @@ class Milestone1Response(BaseModel):
     corneal_reflections: Optional[Dict[str, Any]] = Field(default=None, description="Physical optics corneal reflection and specular highlight symmetry analysis")
     perceptual_hashes: Optional[Dict[str, Any]] = Field(default=None, description="Robust 64-bit DCT perceptual hash, dHash, and reverse search lookup references")
     canonical_verdict: Optional[CanonicalBinaryVerdict] = Field(default=None, description="Mission 22 Consumer-First Canonical Binary Decision")
+    brahma_permission: Optional[Dict[str, Any]] = Field(default=None, description="BRAHMA Policy Intelligence & Pre-Publication Permission Decision")
+    provenance_record: Optional[ProvenanceRecord] = Field(default=None, description="Mission 4 Comprehensive Provenance Record")
     component_errors: List[ComponentError] = Field(default_factory=list, description="Non-fatal component-level errors if any")
     disclaimer: str = Field(
         default=(
@@ -461,6 +583,8 @@ class RGBFrameSample(BaseModel):
     b_std: float = Field(..., description="Normalized Blue channel standard deviation")
     delta_prev_frame: float = Field(..., description="L1 norm difference from preceding sample")
     thumbnail_data_url: Optional[str] = Field(default=None, description="Low-res thumbnail JPEG data URL")
+    thumbnail_b64: Optional[str] = Field(default=None, description="Base64 encoded thumbnail image")
+    heart_rate_bpm: Optional[float] = Field(default=None, description="Instantaneous estimated biological heart rate in BPM")
     ai_probability: Optional[float] = Field(default=None, description="Per-frame neural AI probability [0, 1]")
     ai_class: Optional[str] = Field(default=None, description="'AI_GENERATED' or 'LIKELY_REAL'")
     sensor_noise_variance: Optional[float] = Field(default=None, description="High-frequency Laplacian sensor noise proxy")
@@ -474,6 +598,8 @@ class RGBSummary(BaseModel):
     gb_correlation: float = Field(..., description="Pearson correlation between Green and Blue channels")
     temporal_jitter_index: float = Field(..., description="Normalized frame-to-frame variance metric")
     dominant_pulse_hz: Optional[float] = Field(default=None, description="Estimated temporal frequency harmonic in Hz if observable")
+    estimated_heart_rate_bpm: Optional[float] = Field(default=None, description="Estimated heart rate in BPM from optical rPPG")
+    spectral_entropy: Optional[float] = Field(default=None, description="Spectral entropy of chromatic distribution")
 
 
 class VideoAIVerdict(BaseModel):
@@ -582,3 +708,5 @@ class VideoForensicResult(BaseModel):
     fusion_verdict: Optional[VideoFusionResult] = Field(default=None, description="Multi-layer calibrated fusion decision")
     runtime_breakdown_ms: Optional[Dict[str, float]] = Field(default=None, description="Measured execution time per branch and decoder")
     canonical_verdict: Optional[CanonicalBinaryVerdict] = Field(default=None, description="Mission 22 Consumer-First Canonical Binary Decision")
+    brahma_permission: Optional[Dict[str, Any]] = Field(default=None, description="BRAHMA Policy Intelligence & Pre-Publication Permission Decision")
+    provenance_record: Optional[ProvenanceRecord] = Field(default=None, description="Mission 4 Comprehensive Provenance Record")

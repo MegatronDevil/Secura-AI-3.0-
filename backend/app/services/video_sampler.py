@@ -61,8 +61,29 @@ class VideoFrameSampler:
 
     def sample_from_bytes(self, video_bytes: bytes, filename: str = "video.mp4") -> SamplingResult:
         start_time = time.perf_counter()
-        
-        suffix = os.path.splitext(filename)[1].lower() or ".mp4"
+
+        # Detect the actual container from magic bytes, not from the filename.
+        # Instagram/Facebook Reels send an obfuscated token filename (e.g. AQM...Q.mp4)
+        # but MediaRecorder blobs are actually WebM containers.
+        def _detect_suffix(data: bytes) -> str:
+            if len(data) >= 4:
+                # WebM / Matroska: starts with 0x1A45DFA3
+                if data[:4] == b'\x1a\x45\xdf\xa3':
+                    return ".webm"
+                # RIFF container (WebM occasionally wrapped as RIFF on some browsers)
+                if data[:4] == b'RIFF':
+                    return ".webm"
+                # MP4/MOV: ftyp box at offset 4
+                if len(data) >= 8 and data[4:8] in (b'ftyp', b'moov', b'mdat', b'free', b'skip'):
+                    return ".mp4"
+                # OGG
+                if data[:4] == b'OggS':
+                    return ".ogg"
+            # Fallback to extension from filename, default .mp4
+            ext = os.path.splitext(filename)[1].lower()
+            return ext if ext in (".mp4", ".webm", ".mov", ".ogg", ".mkv", ".avi") else ".mp4"
+
+        suffix = _detect_suffix(video_bytes)
         tmp_fd, tmp_path = tempfile.mkstemp(suffix=suffix, prefix="secura_samp_")
         try:
             with os.fdopen(tmp_fd, "wb") as f:

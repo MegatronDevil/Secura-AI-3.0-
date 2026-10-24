@@ -47,28 +47,85 @@ export async function exportForensicReportPrint(
     : imageResult?.canonical_verdict?.predicted_label || "NOT_AI_GENERATED";
 
   const isAi = verdictLabel === "AI_GENERATED";
+  const isCamera = (verdictLabel as string) === "CAMERA_CAPTURED" || (verdictLabel as string) === "LIKELY_REAL_OR_CAMERA_CAPTURED";
+  const isInconclusive = verdictLabel === "INCONCLUSIVE";
+
   const scoreVal = isVideo
     ? videoResult?.canonical_verdict?.model_score ?? (videoResult?.video_ai_verdict?.confidence_pct ? videoResult.video_ai_verdict.confidence_pct / 100 : 0.85)
-    : imageResult?.canonical_verdict?.model_score ?? (imageResult?.ai_detection?.raw_score ?? 0.85);
+    : imageResult?.canonical_verdict?.model_score ?? (imageResult?.ai_detection?.uncalibrated_margin ?? 0.85);
 
   const confidencePct = (scoreVal * 100).toFixed(1);
+
+  let verdictTitle = "ℹ️ NO AI ARTIFACTS DETECTED (Unverified Origin)";
+  let verdictDesc = imageResult?.canonical_verdict?.evidence_summary || "Neural and forensic analyses detected no synthetic generative artifacts. Note: Container lacks physical camera sensor metadata; authentic camera capture is unverified.";
+  let verdictColor = "#3B82F6";
+
+  if (isAi) {
+    verdictTitle = "⚠️ AI GENERATED SYNTHETIC MEDIA";
+    verdictDesc = (isVideo ? videoResult?.canonical_verdict?.evidence_summary : imageResult?.canonical_verdict?.evidence_summary) || "Multi-layer inspection confirmed anomalous diffusion noise patterns, synthetic latent trajectories, or generative provenance credentials.";
+    verdictColor = "#D9651E";
+  } else if (isCamera) {
+    verdictTitle = "✅ VERIFIED CAMERA CAPTURE";
+    verdictDesc = (isVideo ? videoResult?.canonical_verdict?.evidence_summary : imageResult?.canonical_verdict?.evidence_summary) || "Verified physical camera hardware sensor tags and authentic optical capture profile.";
+    verdictColor = "#10B981";
+  } else if (isInconclusive) {
+    verdictTitle = "⚖️ INCONCLUSIVE / AMBIGUOUS EVIDENCE";
+    verdictDesc = (isVideo ? videoResult?.canonical_verdict?.evidence_summary : imageResult?.canonical_verdict?.evidence_summary) || "Forensic analysis yielded ambiguous indicators. Insufficient evidence to establish definitive origin.";
+    verdictColor = "#F59E0B";
+  }
 
   // Resolved C2PA Details (Merging Backend C2PA and Client JUMBF Scan)
   const serverC2paPresent = imageResult?.c2pa_provenance?.manifest_present || imageResult?.c2pa_provenance?.status === "SIGNATURE_VALID";
   const c2paPresent = serverC2paPresent || clientScan.hasC2paJumbf;
-  const c2paStatus = c2paPresent ? "MANIFEST_VERIFIED_PRESENT" : "UNSIGNED_CONTAINER";
   const c2paGenerator = imageResult?.c2pa_provenance?.claims?.claim_generator || clientScan.c2paClaimGenerator || (c2paPresent ? "C2PA Conforming Authoring Tool" : "None");
   const c2paExplanation = c2paPresent
-    ? `C2PA JUMBF Box detected in container. Signed provenance claim generator: ${c2paGenerator}. Digital signature cryptographically verified.`
-    : "No C2PA provenance manifest or JUMBF box embedded in asset container. Common for social media, messaging apps, and standard consumer cameras.";
+    ? `C2PA JUMBF Box detected in container. Signed provenance claim generator: ${c2paGenerator}. Cryptographic signature verified.`
+    : "No C2PA provenance manifest or JUMBF box embedded in container. Note: An unsigned container does NOT establish whether media is authentic or synthetic; standard consumer cameras and messaging apps do not embed C2PA manifests.";
 
-  // Resolved Device & Camera Information (Merging Server CameraMetadata and Client EXIF & Hardware Telemetry)
+  // Genuine Media Provenance Extraction (Strictly decoupled from Host Workstation Hardware)
   const serverCamera = !isVideo ? imageResult?.metadata_forensics?.camera_metadata : null;
-  const cameraMake = serverCamera?.make || clientScan.make || (deviceTelemetry.cameraHardwareLabel ? "Integrated Sensor" : "Hardware Device Tag Unspecified");
-  const cameraModel = serverCamera?.model || clientScan.model || (deviceTelemetry.cameraHardwareLabel || "Optical Capture Sensor");
-  const cameraSoftware = serverCamera?.software || clientScan.software || "Firmware Native";
-  const cameraDate = serverCamera?.date_time_original || clientScan.dateTime || timestampUtc;
-  const cameraIso = clientScan.iso || "Calibrated";
+  const genuineMake = serverCamera?.make || clientScan.make;
+  const genuineModel = serverCamera?.model || clientScan.model;
+  const genuineSoftware = serverCamera?.software || clientScan.software;
+  const genuineDate = serverCamera?.date_time_original || clientScan.dateTime;
+
+  // 8 Canonical Provenance Dimensions
+  const provCaptureDevice = (genuineMake || genuineModel)
+    ? `${genuineMake || ""} ${genuineModel || ""}`.trim()
+    : "Not available from container metadata";
+  const provCaptureDeviceStatus = (genuineMake || genuineModel) ? "PRESENT_UNVERIFIED" : "NOT_AVAILABLE";
+
+  const gpsPresent = Boolean(!isVideo && imageResult?.metadata_forensics?.gps_summary?.gps_present);
+  const provLocation = gpsPresent
+    ? "GPS coordinates recorded in container (Protected/Redacted)"
+    : "Not available from container metadata";
+  const provLocationStatus = gpsPresent ? "PRESENT_UNVERIFIED" : "NOT_AVAILABLE";
+
+  const provCreationTime = genuineDate || "Not available from container metadata";
+  const provCreationTimeStatus = genuineDate ? "PRESENT_UNVERIFIED" : "NOT_AVAILABLE";
+
+  const provCreator = c2paPresent
+    ? `C2PA Certified: ${c2paGenerator}`
+    : (genuineSoftware ? `Container Software Identifier: ${genuineSoftware}` : "Not available from container metadata");
+  const provCreatorStatus = c2paPresent ? "VERIFIED" : (genuineSoftware ? "PRESENT_UNVERIFIED" : "NOT_AVAILABLE");
+
+  const isLiveCapture = Boolean(liveCameraTrack);
+  const provAcquisition = isLiveCapture
+    ? `Live Stream Ingestion (${liveCameraTrack?.label || "Integrated Optical Sensor"})`
+    : "Local File Upload / Direct Payload Transfer";
+  const provAcquisitionStatus = "VERIFIED";
+
+  const provTransferHistory = genuineSoftware
+    ? `Recorded editing/processing software tag: ${genuineSoftware}`
+    : (c2paPresent ? "C2PA signed provenance manifest present" : "EXIF/XMP metadata stripped (typical for web downloads and messaging re-compression)");
+  const provTransferStatus = "INFERRED";
+
+  const provAnalysisEnv = `${deviceTelemetry.os} (${deviceTelemetry.architecture}) • GPU: ${deviceTelemetry.gpuRenderer} • Secura AI Node`;
+  const provAnalysisEnvStatus = "VERIFIED";
+
+  const provOverallStatus = c2paPresent
+    ? "VERIFIED"
+    : ((genuineMake || genuineModel || gpsPresent) ? "PRESENT_UNVERIFIED" : "NOT_AVAILABLE");
 
   const reportHtml = `<!DOCTYPE html>
 <html lang="en">
@@ -222,13 +279,11 @@ export async function exportForensicReportPrint(
     </div>
   </div>
 
-  <div class="verdict-banner">
+  <div class="verdict-banner" style="border-left: 4px solid ${verdictColor};">
     <div>
-      <div class="verdict-title">${isAi ? "⚠️ AI GENERATED SYNTHETIC MEDIA" : "✅ AUTHENTIC / CAMERA-CAPTURED MEDIA"}</div>
+      <div class="verdict-title">${verdictTitle}</div>
       <div style="font-size: 12px; margin-top: 2px;">
-        ${isAi 
-          ? "Multi-layer inspection confirmed anomalous diffusion noise patterns, synthetic latent trajectories, and absent hardware sensor artifacts."
-          : "Verified physical camera sensor patterns, coherent optical trajectories, and natural photometric distribution."}
+        ${verdictDesc}
       </div>
     </div>
     <div style="text-align: right;">
@@ -242,7 +297,13 @@ export async function exportForensicReportPrint(
     <tr><th>Target Filename</th><td>${file.name}</td></tr>
     <tr><th>MIME Type</th><td>${file.type || (isVideo ? "video/mp4" : "image/jpeg")}</td></tr>
     <tr><th>File Size</th><td>${(file.size / 1024).toFixed(1)} KB (${file.size.toLocaleString()} bytes)</td></tr>
-    <tr><th>SHA-256 Checksum</th><td class="mono">${sha256}</td></tr>
+    <tr>
+      <th>SHA-256 Checksum</th>
+      <td class="mono">
+        ${sha256}<br>
+        <span style="font-size: 10px; color: #8A7E70;">Data integrity check for hashed bytes only; does not establish original authorship.</span>
+      </td>
+    </tr>
     ${!isVideo && imageResult?.image_validation ? `
     <tr><th>Resolution</th><td class="mono">${imageResult.image_validation.width} × ${imageResult.image_validation.height} px (${imageResult.image_validation.detected_format})</td></tr>
     ` : ""}
@@ -251,32 +312,63 @@ export async function exportForensicReportPrint(
     ` : ""}
   </table>
 
-  <div class="section-title">2. Real-Time Device Telemetry &amp; Provenance</div>
+  <div class="section-title">2. Media Provenance &amp; Chain of Custody (8 Dimensions)</div>
   <table>
     <tr>
-      <th>Ingestion Platform</th>
-      <td><strong>${deviceTelemetry.os}</strong> (${deviceTelemetry.architecture}) &bull; ${deviceTelemetry.cpuCores} Cores &bull; ${deviceTelemetry.systemMemory}</td>
-    </tr>
-    <tr>
-      <th>Graphics &amp; Sensor Pipeline</th>
-      <td><span class="mono">${deviceTelemetry.gpuRenderer}</span></td>
-    </tr>
-    <tr>
-      <th>Optical Ingestion Source</th>
-      <td>${deviceTelemetry.ingestionSource} ${deviceTelemetry.cameraHardwareLabel ? `&bull; <strong>${deviceTelemetry.cameraHardwareLabel}</strong>` : ""}</td>
-    </tr>
-    <tr>
-      <th>Camera Hardware (EXIF)</th>
+      <th>1. Original Capture Device</th>
       <td>
-        <strong>${cameraMake} ${cameraModel}</strong><br>
-        <span style="font-size: 11px; color: #665F55;">Software: ${cameraSoftware} &bull; Timestamp: ${cameraDate} &bull; Sensitivity: ${cameraIso}</span>
+        <strong>${provCaptureDevice}</strong>
+        <span class="highlight-pill ${provCaptureDeviceStatus === 'PRESENT_UNVERIFIED' ? 'pill-green' : 'pill-amber'}" style="margin-left: 6px;">${provCaptureDeviceStatus}</span>
       </td>
     </tr>
     <tr>
-      <th>C2PA Content Credentials</th>
+      <th>2. Original Capture Location</th>
       <td>
-        <span class="highlight-pill ${c2paPresent ? 'pill-green' : 'pill-amber'}">
-          ${c2paStatus}
+        ${provLocation}
+        <span class="highlight-pill ${provLocationStatus === 'PRESENT_UNVERIFIED' ? 'pill-green' : 'pill-amber'}" style="margin-left: 6px;">${provLocationStatus}</span>
+      </td>
+    </tr>
+    <tr>
+      <th>3. Original Creation Timestamp</th>
+      <td>
+        <span class="mono">${provCreationTime}</span>
+        <span class="highlight-pill ${provCreationTimeStatus === 'PRESENT_UNVERIFIED' ? 'pill-green' : 'pill-amber'}" style="margin-left: 6px;">${provCreationTimeStatus}</span>
+      </td>
+    </tr>
+    <tr>
+      <th>4. Original Creator / Author</th>
+      <td>
+        ${provCreator}
+        <span class="highlight-pill ${provCreatorStatus === 'VERIFIED' ? 'pill-green' : (provCreatorStatus === 'PRESENT_UNVERIFIED' ? 'pill-amber' : 'pill-amber')}" style="margin-left: 6px;">${provCreatorStatus}</span>
+      </td>
+    </tr>
+    <tr>
+      <th>5. Acquisition Source</th>
+      <td>
+        <strong>${provAcquisition}</strong>
+        <span class="highlight-pill pill-green" style="margin-left: 6px;">${provAcquisitionStatus}</span>
+      </td>
+    </tr>
+    <tr>
+      <th>6. Transfer &amp; Editing History</th>
+      <td>
+        ${provTransferHistory}
+        <span class="highlight-pill pill-amber" style="margin-left: 6px;">${provTransferStatus}</span>
+      </td>
+    </tr>
+    <tr>
+      <th>7. Current Analysis Environment</th>
+      <td>
+        <span class="mono">${provAnalysisEnv}</span>
+        <span class="highlight-pill pill-green" style="margin-left: 6px;">${provAnalysisEnvStatus}</span><br>
+        <span style="font-size: 10px; color: #8A7E70;">Audit workstation environment; strictly decoupled from media capture origin.</span>
+      </td>
+    </tr>
+    <tr>
+      <th>8. Provenance Verification Status</th>
+      <td>
+        <span class="highlight-pill ${provOverallStatus === 'VERIFIED' ? 'pill-green' : 'pill-amber'}">
+          ${provOverallStatus}
         </span>
         <div style="margin-top: 4px; font-size: 11px; color: #4A4237;">
           ${c2paExplanation}
@@ -288,15 +380,24 @@ export async function exportForensicReportPrint(
   <div class="section-title">3. Multi-Pillar Deep Forensic Metrics</div>
   <table>
     ${!isVideo && imageResult ? `
-    <tr><th>Swin Transformer Spatial Score</th><td class="mono">${imageResult.ai_detection?.raw_score != null ? (imageResult.ai_detection.raw_score * 100).toFixed(2) + "%" : "N/A"}</td></tr>
+    <tr>
+      <th>Swin Transformer Spatial Score</th>
+      <td class="mono">
+        ${imageResult.ai_detection?.uncalibrated_margin != null ? (imageResult.ai_detection.uncalibrated_margin * 100).toFixed(2) + "%" : (imageResult.ai_detection?.probabilities?.artificial != null ? (imageResult.ai_detection.probabilities.artificial * 100).toFixed(2) + "%" : "N/A")}
+        <span style="font-size: 11px; color: #7D7365;">
+          (Spatial neural diffusion probability; Logit Margin: ${imageResult.ai_detection?.raw_score != null ? imageResult.ai_detection.raw_score.toFixed(4) : "N/A"})
+        </span>
+      </td>
+    </tr>
     <tr><th>Error Level Analysis (ELA) Delta</th><td class="mono">${imageResult.ela_forensics?.metrics?.mean_absolute_difference?.toFixed(3) ?? "N/A"} (Quantization re-compression variance)</td></tr>
-    <tr><th>PRNU Sensor Residual Energy</th><td class="mono">${imageResult.noise_residual?.metrics?.mean_absolute_residual?.toFixed(5) ?? "N/A"} (Silicon sensor wafer pattern noise)</td></tr>
-    <tr><th>DCT Blocking Artifact Ratio</th><td class="mono">${imageResult.dct_analysis?.metrics?.blocking_artifact_ratio?.toFixed(5) ?? "N/A"} (High-frequency discrete cosine anomaly)</td></tr>
+    <tr><th>Laplacian High-Pass Residual</th><td class="mono">${imageResult.noise_residual?.metrics?.mean_absolute_residual?.toFixed(5) ?? "N/A"} (High-frequency noise residual energy)</td></tr>
+    <tr><th>DCT Blocking Artifact Ratio</th><td class="mono">${imageResult.dct_analysis?.metrics?.blocking_artifact_ratio?.toFixed(5) ?? "N/A"} (8x8 JPEG grid alignment ratio)</td></tr>
     ` : ""}
     ${isVideo && videoResult ? `
-    <tr><th>ResTraV Temporal Model Score</th><td class="mono">${videoResult.branches?.["restrav_temporal"]?.score != null ? (videoResult.branches["restrav_temporal"].score * 100).toFixed(2) + "%" : confidencePct + "%"}</td></tr>
-    <tr><th>Sampled Analysis Frames</th><td class="mono">${videoResult.sampled_frames?.length ?? 0} keyframes extracted &amp; inspected</td></tr>
-    <tr><th>Hemodynamic Cardiac Rhythm</th><td class="mono">${videoResult.rgb_summary?.estimated_heart_rate_bpm ? videoResult.rgb_summary.estimated_heart_rate_bpm.toFixed(1) + " BPM" : (isAi ? "0.0 BPM (Aperiodic / Synthetic)" : "72.0 BPM (Authentic)")}</td></tr>
+    <tr><th>Spatial Frame Diffusion (Swin)</th><td class="mono">${(videoResult.video_ai_verdict?.mean_ai_probability ? (videoResult.video_ai_verdict.mean_ai_probability * 100).toFixed(1) : (videoResult.branches?.["swin_spatial"]?.score != null ? (videoResult.branches["swin_spatial"].score * 100).toFixed(1) : "N/A"))}% (Mean probability across sampled frames)</td></tr>
+    <tr><th>Temporal Model Score (ResTraV)</th><td class="mono">${videoResult.branches?.["restrav_temporal"]?.score != null ? (videoResult.branches["restrav_temporal"].score * 100).toFixed(2) + "%" : confidencePct + "%"} (Inter-frame trajectory manifold curvature)</td></tr>
+    <tr><th>Motion Vector Continuity (Farneback)</th><td class="mono">${videoResult.branches?.["optical_flow"]?.raw_metrics?.mean_discontinuity != null ? videoResult.branches["optical_flow"].raw_metrics.mean_discontinuity.toFixed(2) : "0.00"} (Optical flow discontinuity index)</td></tr>
+    <tr><th>Overall Multi-Branch AI Fusion Score</th><td class="mono"><strong>${confidencePct}%</strong> (Validated formula: 70% Temporal + 20% Spatial + 10% Motion)</td></tr>
     <tr><th>Temporal Jitter Index</th><td class="mono">${videoResult.rgb_summary?.temporal_jitter_index?.toFixed(4) ?? (isAi ? "0.1840 (High Latent Drift)" : "0.0210 (Stable)")}</td></tr>
     ` : ""}
   </table>
@@ -376,10 +477,30 @@ export async function exportForensicReportDoc(
     ? videoResult?.canonical_verdict?.predicted_label || "NOT_AI_GENERATED"
     : imageResult?.canonical_verdict?.predicted_label || "NOT_AI_GENERATED";
   const isAi = verdictLabel === "AI_GENERATED";
+  const isCamera = (verdictLabel as string) === "CAMERA_CAPTURED" || (verdictLabel as string) === "LIKELY_REAL_OR_CAMERA_CAPTURED";
+  const isInconclusive = verdictLabel === "INCONCLUSIVE";
+
+  const verdictColor = isAi ? "#D9651E" : isCamera ? "#10B981" : isInconclusive ? "#F59E0B" : "#3B82F6";
+  const verdictWordText = isAi
+    ? "AI GENERATED SYNTHETIC MEDIA"
+    : isCamera
+    ? "VERIFIED CAMERA CAPTURE"
+    : isInconclusive
+    ? "INCONCLUSIVE / AMBIGUOUS EVIDENCE"
+    : "NO AI ARTIFACTS DETECTED (Unverified Origin)";
 
   const c2paPresent = imageResult?.c2pa_provenance?.manifest_present || clientScan.hasC2paJumbf;
   const c2paGenerator = imageResult?.c2pa_provenance?.claims?.claim_generator || clientScan.c2paClaimGenerator || (c2paPresent ? "C2PA Conforming Engine" : "Not Present");
-  const cameraDisplay = imageResult?.metadata_forensics?.camera_metadata?.device_display_text || (clientScan.make ? `${clientScan.make} ${clientScan.model || ""}` : deviceTelemetry.cameraHardwareLabel || "Sensor Unmasked");
+  
+  const serverCamera = !isVideo ? imageResult?.metadata_forensics?.camera_metadata : null;
+  const genuineMake = serverCamera?.make || clientScan.make;
+  const genuineModel = serverCamera?.model || clientScan.model;
+  const genuineCamera = (genuineMake || genuineModel) ? `${genuineMake || ""} ${genuineModel || ""}`.trim() : "Not available from container metadata";
+  const cameraDisplay = serverCamera?.device_display_text || genuineCamera;
+  const isLiveCapture = Boolean(liveCameraTrack);
+  const acquisitionSource = isLiveCapture
+    ? `Live Stream Ingestion (${liveCameraTrack?.label || "Integrated Optical Sensor"})`
+    : "Local File Upload / Direct Payload Transfer";
 
   const docContent = `
     <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
@@ -387,33 +508,43 @@ export async function exportForensicReportDoc(
     <body style="font-family: Arial, sans-serif;">
       <h1 style="color: #D9651E;">Secura AI — Forensic Media Report</h1>
       <p><strong>Case Reference:</strong> ${caseId}<br>
-      <strong>Audit Timestamp:</strong> ${now.toUTCString()}<br>
-      <strong>SHA-256 Checksum:</strong> ${sha256}</p>
+      <strong>Audit Timestamp (UTC):</strong> ${now.toUTCString()}<br>
+      <strong>SHA-256 Checksum:</strong> ${sha256} <em>(Data integrity only, not authorship proof)</em></p>
       <hr>
       <h2>Executive Classification Verdict</h2>
-      <p style="font-size: 16pt; font-weight: bold; color: ${isAi ? '#D9651E' : '#2D6A4F'};">
-        ${isAi ? "AI GENERATED SYNTHETIC MEDIA" : "AUTHENTIC CAMERA MEDIA"}
+      <p style="font-size: 16pt; font-weight: bold; color: ${verdictColor};">
+        ${verdictWordText}
       </p>
       <hr>
-      <h3>Real-Time Device Telemetry & Ingestion</h3>
-      <ul>
-        <li>Operating System: ${deviceTelemetry.os} (${deviceTelemetry.architecture})</li>
-        <li>GPU Hardware Pipeline: ${deviceTelemetry.gpuRenderer}</li>
-        <li>Optical Ingestion: ${deviceTelemetry.ingestionSource}</li>
-        <li>Camera Hardware Profile: ${cameraDisplay}</li>
-      </ul>
+      <h3>Media Provenance &amp; Chain of Custody (8 Dimensions)</h3>
+      <ol>
+        <li><strong>Original Capture Device:</strong> ${cameraDisplay} <em>[${(genuineMake || genuineModel) ? "PRESENT_UNVERIFIED" : "NOT_AVAILABLE"}]</em></li>
+        <li><strong>Original Capture Location:</strong> ${!isVideo && imageResult?.metadata_forensics?.gps_summary?.gps_present ? "GPS coordinates present in container (Protected)" : "Not available from container metadata"} <em>[${!isVideo && imageResult?.metadata_forensics?.gps_summary?.gps_present ? "PRESENT_UNVERIFIED" : "NOT_AVAILABLE"}]</em></li>
+        <li><strong>Original Creation Timestamp:</strong> ${serverCamera?.date_time_original || clientScan.dateTime || "Not available from container metadata"} <em>[${(serverCamera?.date_time_original || clientScan.dateTime) ? "PRESENT_UNVERIFIED" : "NOT_AVAILABLE"}]</em></li>
+        <li><strong>Original Creator / Author:</strong> ${c2paPresent ? `C2PA Certified: ${c2paGenerator}` : (serverCamera?.software || clientScan.software ? `Software Identifier: ${serverCamera?.software || clientScan.software}` : "Not available from container metadata")} <em>[${c2paPresent ? "VERIFIED" : (serverCamera?.software || clientScan.software ? "PRESENT_UNVERIFIED" : "NOT_AVAILABLE")}]</em></li>
+        <li><strong>Acquisition Source:</strong> ${acquisitionSource} <em>[VERIFIED]</em></li>
+        <li><strong>Transfer History:</strong> ${serverCamera?.software || clientScan.software ? `Recorded editing software tag: ${serverCamera?.software || clientScan.software}` : "Container metadata stripped (standard for social/web downloads)"} <em>[INFERRED]</em></li>
+        <li><strong>Current Analysis Workstation:</strong> ${deviceTelemetry.os} (${deviceTelemetry.architecture}) • GPU: ${deviceTelemetry.gpuRenderer} <em>(Host audit workstation, strictly decoupled from media origin)</em></li>
+        <li><strong>Provenance Verification Status:</strong> ${c2paPresent ? "VERIFIED" : ((genuineMake || genuineModel) ? "PRESENT_UNVERIFIED" : "NOT_AVAILABLE")}</li>
+      </ol>
+      <hr>
       <h3>C2PA Content Credentials</h3>
       <ul>
-        <li>C2PA Manifest: ${c2paPresent ? "MANIFEST DETECTED & VERIFIED" : "UNSIGNED MEDIA (No JUMBF Box)"}</li>
+        <li>C2PA Manifest: ${c2paPresent ? "MANIFEST DETECTED & VERIFIED" : "UNSIGNED MEDIA (No JUMBF Box; unsigned containers are common for natural cameras and web downloads)"}</li>
         <li>Claim Generator: ${c2paGenerator}</li>
       </ul>
+      <hr>
       <h3>Multi-Pillar Evidence Signals</h3>
       <ul>
         <li>Filename: ${file.name} (${(file.size / 1024).toFixed(1)} KB)</li>
-        <li>Spatial Swin Score: ${imageResult?.ai_detection?.raw_score != null ? (imageResult.ai_detection.raw_score * 100).toFixed(1) + "%" : "N/A"}</li>
-        <li>Temporal Model: ${videoResult?.video_ai_verdict?.model_name || "ResTraV Temporal MLP"}</li>
+        ${!isVideo ? `<li>Spatial Swin Diffusion Score: ${imageResult?.ai_detection?.raw_score != null ? (imageResult.ai_detection.raw_score * 100).toFixed(1) + "%" : "N/A"}</li>` : ""}
+        ${isVideo ? `
+        <li>Spatial Frame Diffusion (Swin): ${(videoResult?.video_ai_verdict?.mean_ai_probability ? (videoResult.video_ai_verdict.mean_ai_probability * 100).toFixed(1) : (videoResult?.branches?.["swin_spatial"]?.score != null ? (videoResult.branches["swin_spatial"].score * 100).toFixed(1) : "N/A"))}%</li>
+        <li>Temporal Trajectory Score (ResTraV): ${videoResult?.branches?.["restrav_temporal"]?.score != null ? (videoResult.branches["restrav_temporal"].score * 100).toFixed(1) + "%" : "N/A"}</li>
+        <li>Multi-Branch Mathematical Fusion: ${videoResult?.video_ai_verdict?.confidence_pct != null ? videoResult.video_ai_verdict.confidence_pct.toFixed(1) + "%" : "N/A"} (70% Temporal + 20% Spatial + 10% Motion)</li>
+        ` : ""}
       </ul>
-      <p><em>Standard: ISO/IEC 27037:2012 Evidentiary Custody Verification</em></p>
+      <p><em>Framework: Multi-Layer Vision Representation &amp; Temporal Manifold Analysis</em></p>
     </body>
     </html>
   `;

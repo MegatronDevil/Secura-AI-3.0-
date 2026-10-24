@@ -1,8 +1,10 @@
 // Shared API base resolution for ALL Secura AI frontend HTTP calls.
-// - Dev: VITE_API_BASE_URL unset -> http://localhost:8000 (direct to FastAPI backend)
-// - Prod: VITE_API_BASE_URL set in Vercel env -> Railway backend origin
-// - Prod fallback: same-origin (Vercel /api rewrites) when env var missing
+// On non-localhost devices (such as mobile phones accessing via Cloudflare tunnels or remote IPs),
+// ALWAYS use same-origin relative paths ("") so the browser calls the same host that served the page.
+const envUrl = import.meta.env.VITE_API_BASE_URL;
 export const API_BASE_URL: string =
-  import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.PROD ? "" : "http://localhost:8000");
+  typeof window !== "undefined" && !window.location.hostname.includes("localhost") && !window.location.hostname.includes("127.0.0.1")
+    ? ""
+    : (envUrl || "");
 
 export const withBase = (path: string): string => `${API_BASE_URL}${path}`;

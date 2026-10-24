@@ -2,6 +2,7 @@
 # Multi-Head Detection Engine: UniversalFakeDetect (CVPR 2023) + Swin Vision Transformer
 
 import hashlib
+import json
 import logging
 import threading
 import time
@@ -62,6 +63,12 @@ MODEL_HEADS = {
         "model_version": "1.0.0-ensemble",
         "filename": "ensemble",
         "description": "Consensus engine combining Swin Vision Transformer with CLIP ViT-L/14 probe.",
+    },
+    "ExtensionImageDetectorV1": {
+        "model_name": "Secura Extension Image Detector v1",
+        "model_version": "1.0.0-ext-robust",
+        "filename": "extension_image_detector_v1/model_weights.pt",
+        "description": "Robust image-classification model trained specifically for Chrome extension web and social-media CDN images, lossy JPEG compression, and downscaling.",
     }
 }
 
@@ -102,6 +109,9 @@ class AIImageDetectorService:
         self.weights_loaded: bool = False
         self.backbone_loaded: bool = False
         self.swin_loaded: bool = False
+        self.extension_head = None
+        self.extension_threshold: float = 0.50
+        self.extension_loaded: bool = False
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
         # Vision models
@@ -127,10 +137,10 @@ class AIImageDetectorService:
 
                 content = self.weights_path.read_bytes()
                 expected_sha = None
-                if self.weights_path.name == "fc_weights.pth":
+                if self.weights_path.name == "custom_fc_weights.pth":
+                    expected_sha = "501a0b8c48e0d6b4b8d3c60301106f038638a8f8cf04985b04a22e079283627f"
+                elif "fc_weights" in self.weights_path.name:
                     expected_sha = EXPECTED_FC_WEIGHTS_SHA256
-                elif self.weights_path.name == "custom_fc_weights.pth":
-                    expected_sha = "85bd1cf7d6c61ea851a28d5098e8b7d1187aeb8654deb5a183be8e1df7cc8259"
 
                 if expected_sha is not None:
                     computed_sha = hashlib.sha256(content).hexdigest()
@@ -138,6 +148,7 @@ class AIImageDetectorService:
                         self.status = AIDetectionStatus.UNAVAILABLE
                         self.init_error = f"Linear probe weights checksum mismatch: expected {expected_sha[:8]}, got {computed_sha[:8]}"
                         logger.warning("AI Image Detector: %s", self.init_error)
+                        return
 
                 with zipfile.ZipFile(self.weights_path, "r") as z:
                     data_0 = z.read("fc_weights/data/0")
@@ -226,9 +237,55 @@ class AIImageDetectorService:
         elif head_name == "Ensemble":
             self.weights_path = self.weights_dir / "custom_fc_weights.pth"
             self._load_linear_probe(self.weights_path, None)
+        elif head_name == "ExtensionImageDetectorV1":
+            self.weights_path = self.weights_dir / "extension_image_detector_v1" / "model_weights.pt"
+            self._load_extension_detector(self.weights_path)
 
         logger.info("Switched active head to %s", self.model_name)
         return True
+
+    def _load_extension_detector(self, path: Path) -> bool:
+        """Helper to load isolated extension-specific robust MLP head."""
+        if not path.exists():
+            logger.warning("Extension detector weights not found at %s", path)
+            return False
+        try:
+            import torch.nn as nn
+            class ExtensionRobustMLP(nn.Module):
+                def __init__(self, in_features: int = 768, hidden_dim: int = 256, dropout_rate: float = 0.0):
+                    super().__init__()
+                    self.net = nn.Sequential(
+                        nn.Linear(in_features, hidden_dim),
+                        nn.LayerNorm(hidden_dim),
+                        nn.GELU(),
+                        nn.Dropout(dropout_rate),
+                        nn.Linear(hidden_dim, 64),
+                        nn.GELU(),
+                        nn.Dropout(dropout_rate * 0.5),
+                        nn.Linear(64, 1)
+                    )
+                def forward(self, x: torch.Tensor) -> torch.Tensor:
+                    return self.net(x).squeeze(-1)
+
+            ckpt = torch.load(path, map_location=self.device)
+            self.extension_head = ExtensionRobustMLP(in_features=768, hidden_dim=256, dropout_rate=0.0).to(self.device)
+            self.extension_head.load_state_dict(ckpt["model_state_dict"])
+            self.extension_head.eval()
+
+            cfg_path = path.parent / "config.json"
+            if cfg_path.exists():
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                    self.extension_threshold = float(cfg.get("operating_threshold", 0.50))
+
+            self.extension_loaded = True
+            self.weights_loaded = True
+            self.status = AIDetectionStatus.LOADED
+            logger.info("ExtensionImageDetectorV1 loaded successfully (operating threshold: %.2f)", self.extension_threshold)
+            return True
+        except Exception as e:
+            logger.error("Error loading ExtensionImageDetectorV1: %s", e)
+            return False
 
     def _load_linear_probe(self, path: Path, expected_sha: Optional[str]) -> bool:
         """Helper to load linear probe weights from a zip archive."""
@@ -302,7 +359,7 @@ class AIImageDetectorService:
 
         return logit, margin, pred_class, decision
 
-    def detect(self, image: Image.Image, feature_override: Optional[np.ndarray] = None) -> AIDetectorResult:
+    def detect(self, image: Image.Image, feature_override: Optional[np.ndarray] = None, is_video_frame: bool = False) -> AIDetectorResult:
         """Run classification pipeline on an image or provided feature vector."""
         if image is None or image.width == 0 or image.height == 0:
             return AIDetectorResult(
@@ -341,6 +398,10 @@ class AIImageDetectorService:
             is_head_ready = self.swin_loaded
         elif self.active_head == "Ensemble":
             is_head_ready = self.swin_loaded or self.weights_loaded
+        elif self.active_head == "ExtensionImageDetectorV1":
+            if not self.extension_loaded:
+                self._load_extension_detector(self.weights_dir / "extension_image_detector_v1" / "model_weights.pt")
+            is_head_ready = self.extension_loaded
         else:
             is_head_ready = self.weights_loaded
 
@@ -458,25 +519,63 @@ class AIImageDetectorService:
                 c_logit, c_margin, _, _ = self.compute_linear_probe(feats)
                 p_clip_ai = float(c_margin)
 
-                # Calibrated Asymmetric Consensus:
-                # 1. Clear consensus: both agree
+                # Lighting and specular highlight analysis
+                gray = np.array(rgb_img.convert("L"))
+                specular_ratio = float(np.mean(gray >= 235))
+                pure_white_ratio = float(np.mean(gray >= 248))
+                high_lum_ratio = float(np.mean(gray >= 210))
+                h, w = gray.shape
+                center_crop = gray[int(h * 0.15):int(h * 0.75), int(w * 0.20):int(w * 0.80)]
+                center_specular = float(np.mean(center_crop >= 220)) if center_crop.size > 0 else 0.0
+                is_harsh_lighting = (specular_ratio >= 0.035 or center_specular >= 0.10 or high_lum_ratio >= 0.07)
+                is_clean_diagram_or_chart = (pure_white_ratio >= 0.50 and specular_ratio >= 0.55)
+
+                # Calibrated Multi-Architecture Consensus with Video Frame & Compression Protection:
                 if p_swin_ai >= 0.50 and p_clip_ai >= 0.50:
                     p_ai = float(max(p_swin_ai, p_clip_ai))
-                elif p_swin_ai < 0.40 and p_clip_ai < 0.40:
-                    p_ai = float(min(p_swin_ai, p_clip_ai))
-                # 2. Asymmetric sensitivity to high-detail generative diffusion (e.g. Swin detects synthetic micro-textures)
-                elif p_swin_ai > 0.58 and p_clip_ai >= 0.30:
-                    p_ai = float(p_swin_ai)
-                # 3. Default balanced blend
+                elif is_clean_diagram_or_chart and p_swin_ai <= 0.20:
+                    # Scientific Plot / Diagram / Chart Domain Calibration
+                    p_ai = float(0.80 * p_swin_ai + 0.20 * p_clip_ai)
+                elif is_video_frame and p_clip_ai <= 0.45:
+                    # Video Frame Calibration: In-browser video frames exhibit lossy H.264/VP9 macroblock edges
+                    # and temporal motion blur that activate Swin patch attention.
+                    # When CLIP confirms authentic photographic realism (p_clip_ai <= 0.45), anchor consensus to CLIP.
+                    p_ai = float(0.20 * p_swin_ai + 0.80 * p_clip_ai)
+                elif is_harsh_lighting and p_clip_ai <= 0.38:
+                    # Lighting Management: Direct phone flash washes out skin pores into specular patches
+                    p_ai = float(0.20 * p_swin_ai + 0.80 * p_clip_ai)
+                elif p_swin_ai <= 0.40 and p_clip_ai <= 0.40:
+                    p_ai = float(0.50 * p_swin_ai + 0.50 * p_clip_ai)
+                # Generative diffusion detection (Swin specializes in diffusion micro-textures & artistic synthesis)
+                elif p_swin_ai >= 0.72 and p_clip_ai > 0.25:
+                    # High-confidence diffusion texture confirmed
+                    p_ai = float(max(p_swin_ai, 0.60 * p_swin_ai + 0.40 * p_clip_ai))
+                elif p_swin_ai >= 0.52 and p_clip_ai <= 0.38:
+                    # Moderate Swin with authentic photographic CLIP (e.g. video compression or soft focus)
+                    p_ai = float(0.30 * p_swin_ai + 0.70 * p_clip_ai)
+                elif p_swin_ai >= 0.52 and p_clip_ai > 0.38:
+                    p_ai = float(max(p_swin_ai, 0.60 * p_swin_ai + 0.40 * p_clip_ai))
+                # Photorealistic latent artifact detection (CLIP probe specializes in photorealistic generative artifacts)
+                elif p_clip_ai >= 0.60:
+                    p_ai = float(max(p_clip_ai, 0.40 * p_swin_ai + 0.60 * p_clip_ai))
+                # Ambiguous / borderline zone: balanced weighted blend
                 else:
-                    p_ai = float(0.40 * p_swin_ai + 0.60 * p_clip_ai)
+                    p_ai = float(0.50 * p_swin_ai + 0.50 * p_clip_ai)
 
                 p_human = float(1.0 - p_ai)
                 logit = float(np.log(np.clip(p_ai / max(1e-6, 1.0 - p_ai), 1e-6, 1e6)))
                 latency_ms = round((time.time() - t0) * 1000, 2)
-                is_ai = p_ai > 0.5
-                predicted_class = "AI_GENERATED" if is_ai else "LIKELY_REAL"
-                decision = AIDetectionDecision.AI_GENERATED_CLASS if is_ai else AIDetectionDecision.REAL_IMAGE_CLASS
+                
+                # Three-way calibrated classification supporting INCONCLUSIVE
+                if p_ai >= 0.50:
+                    predicted_class = "AI_GENERATED"
+                    decision = AIDetectionDecision.AI_GENERATED_CLASS
+                elif p_ai >= 0.45:
+                    predicted_class = "INCONCLUSIVE"
+                    decision = AIDetectionDecision.INCONCLUSIVE
+                else:
+                    predicted_class = "LIKELY_REAL"
+                    decision = AIDetectionDecision.REAL_IMAGE_CLASS
 
                 return AIDetectorResult(
                     available=True,
@@ -486,7 +585,7 @@ class AIImageDetectorService:
                     model_status=AIDetectionStatus.LOADED,
                     raw_score=round(logit, 4),
                     uncalibrated_margin=round(p_ai, 4),
-                    score_semantics="Dual-model calibrated consensus (Swin Vision Transformer + CLIP ViT-L/14 Probe).",
+                    score_semantics="Dual-model calibrated consensus (Swin Vision Transformer + CLIP ViT-L/14 Probe) with dynamic lighting & specular highlight compensation.",
                     predicted_class=predicted_class,
                     decision_status=decision,
                     probabilities={"artificial": round(p_ai, 4), "human": round(p_human, 4)},
@@ -498,7 +597,79 @@ class AIImageDetectorService:
             except Exception as exc:
                 logger.error("Ensemble inference error: %s", exc)
 
-        # Path C: Standard CLIP Linear Probe (UniversalFakeDetect or SecuraCustom)
+        # Path C: Extension-Specific Robust Image Detector (v1)
+        if self.active_head == "ExtensionImageDetectorV1" and self.backbone_loaded and self.clip_vision_model is not None:
+            if not self.extension_loaded:
+                self._load_extension_detector(self.weights_dir / "extension_image_detector_v1" / "model_weights.pt")
+
+            if self.extension_loaded and self.extension_head is not None:
+                t0 = time.time()
+                try:
+                    rgb_img = image.convert("RGB")
+                    inputs = self.clip_processor(images=rgb_img, return_tensors="pt").to(self.device)
+                    with torch.no_grad():
+                        feats = self.clip_vision_model(**inputs).image_embeds[0].cpu().numpy()
+                    norm = np.linalg.norm(feats)
+                    if norm > 1e-8:
+                        feats = feats / norm
+
+                    feat_tensor = torch.tensor(feats, dtype=torch.float32).unsqueeze(0).to(self.device)
+                    with torch.no_grad():
+                        logit = float(self.extension_head(feat_tensor).item())
+                        p_raw_ai = float(torch.sigmoid(torch.tensor(logit)).item())
+
+                    # Foundational linear probe corroboration (ImageNet/COCO/Flickr baseline)
+                    _, c_margin, _, _ = self.compute_linear_probe(feats)
+
+                    # Dynamic Calibration: If foundational probe firmly asserts authentic camera capture (c_margin <= 0.38),
+                    # anchor consensus to protect against localized graphic/clothing/night-flash false positives on borderline scores:
+                    if c_margin <= 0.38 and 0.40 < p_raw_ai < 0.70:
+                        p_ai = float(0.20 * p_raw_ai + 0.80 * c_margin)
+                    elif (c_margin >= 0.60 or p_raw_ai >= 0.60):
+                        p_ai = float(max(p_raw_ai, c_margin))
+                    else:
+                        p_ai = float(0.50 * p_raw_ai + 0.50 * c_margin)
+
+                    thresh = self.extension_threshold
+                    is_ai = p_ai >= thresh
+                    is_inconclusive = abs(p_ai - thresh) < 0.05
+                    if is_inconclusive:
+                        predicted_class = "INCONCLUSIVE"
+                        decision = AIDetectionDecision.INCONCLUSIVE
+                    elif is_ai:
+                        predicted_class = "AI_GENERATED"
+                        decision = AIDetectionDecision.AI_GENERATED_CLASS
+                    else:
+                        predicted_class = "LIKELY_REAL"
+                        decision = AIDetectionDecision.REAL_IMAGE_CLASS
+
+                    p_human = float(1.0 - p_ai)
+                    latency_ms = round((time.time() - t0) * 1000, 2)
+
+                    return AIDetectorResult(
+                        available=True,
+                        inference_ready=True,
+                        model_name=self.model_name,
+                        model_version=self.model_version,
+                        model_status=AIDetectionStatus.LOADED,
+                        raw_score=round(logit, 4),
+                        uncalibrated_margin=round(p_ai, 4),
+                        score_semantics=f"Calibrated probability p_ai from robust web-compressed MLP head on CLIP ViT-L/14 representations (operating threshold: {thresh:.2f}).",
+                        predicted_class=predicted_class,
+                        decision_status=decision,
+                        probabilities={"artificial": round(p_ai, 4), "human": round(p_human, 4)},
+                        preprocessing="Bicubic resize to 224x224 with aspect-ratio preservation and CLIP channel normalization.",
+                        device_used=self.device,
+                        inference_latency_ms=latency_ms,
+                        limitations=[
+                            "Trained on web CDN compressions, JPEG artifacts, downscaling, and canvas exports.",
+                            "Isolated model designed specifically for Chrome Extension inference contracts."
+                        ],
+                    )
+                except Exception as exc:
+                    logger.error("ExtensionImageDetectorV1 inference error: %s", exc)
+
+        # Path D: Standard CLIP Linear Probe (UniversalFakeDetect or SecuraCustom)
         if self.backbone_loaded and self.clip_vision_model is not None:
             t0 = time.time()
             try:

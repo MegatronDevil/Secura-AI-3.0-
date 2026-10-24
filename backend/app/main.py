@@ -10,6 +10,7 @@ from app.db.session import init_db
 from app.api.routes import router
 from app.api.auth_routes import auth_router
 from app.api.social_routes import social_router
+from app.api.brahma_routes import router as brahma_router
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ def create_application() -> FastAPI:
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
-        allow_origin_regex=r"^https://.*\.vercel\.app$",
+        allow_origin_regex=r"^https://.*(\.vercel\.app|\.trycloudflare\.com)$",
         allow_credentials=True,
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["*"],
@@ -50,7 +51,7 @@ def create_application() -> FastAPI:
     async def add_cors_and_private_network(request: Request, call_next):
         response = await call_next(request)
         origin = request.headers.get("origin")
-        if origin and ("vercel.app" in origin or "localhost" in origin or "127.0.0.1" in origin):
+        if origin and ("vercel.app" in origin or "localhost" in origin or "127.0.0.1" in origin or "trycloudflare.com" in origin):
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Access-Control-Allow-Credentials"] = "true"
         if "access-control-request-private-network" in request.headers:
@@ -59,6 +60,7 @@ def create_application() -> FastAPI:
 
     application.include_router(auth_router, prefix="/api/v1")
     application.include_router(social_router, prefix="/api/v1")
+    application.include_router(brahma_router)
     application.include_router(router)
 
     @application.exception_handler(Exception)

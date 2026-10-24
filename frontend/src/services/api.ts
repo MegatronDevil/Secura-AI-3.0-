@@ -672,13 +672,17 @@ export async function fetchExplainabilityHeatmap(
  */
 export async function sendStreamLivenessFrame(
   frameBlob: Blob,
-  timestampMs?: number
+  timestampMs?: number,
+  frameSeq?: number
 ): Promise<LiveShieldFrameResponse> {
   const formData = new FormData();
   formData.append("file", frameBlob, "webcam_frame.jpg");
   formData.append("frame", frameBlob, "webcam_frame.jpg");
   if (timestampMs !== undefined) {
     formData.append("timestamp_ms", timestampMs.toString());
+  }
+  if (frameSeq !== undefined) {
+    formData.append("frame_seq", frameSeq.toString());
   }
 
   const endpoint = `${API_BASE_URL}/api/v1/stream/liveness-frame`;

@@ -68,7 +68,6 @@ class TemporalRepresentationBranch(BaseVideoBranch):
                 Path(__file__).resolve().parent.parent.parent.parent / "backend" / "models" / "weights" / "restrav_temporal",
                 Path.cwd() / "backend" / "models" / "weights" / "restrav_temporal",
                 Path.cwd() / "models" / "weights" / "restrav_temporal",
-                Path(r"D:\SecuraAI2\backend\models\weights\restrav_temporal"),
             ]
             weights_dir = next((d for d in candidate_dirs if (d / "restrav_mlp.pt").exists()), candidate_dirs[0])
             model_path = weights_dir / "restrav_mlp.pt"

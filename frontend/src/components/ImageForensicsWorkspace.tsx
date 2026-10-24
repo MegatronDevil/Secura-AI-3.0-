@@ -130,8 +130,8 @@ export const ImageForensicsWorkspace: React.FC<ImageForensicsWorkspaceProps> = (
   const rawScore = analysisResult?.canonical_verdict?.model_score ?? 0.5;
   const confidenceScore = analysisResult?.canonical_verdict?.model_score !== undefined
     ? Math.round((isAIGenerated ? rawScore : (1.0 - rawScore)) * 1000) / 10
-    : analysisResult?.ai_detection?.raw_score !== undefined && analysisResult?.ai_detection?.raw_score !== null
-    ? Math.round(analysisResult.ai_detection.raw_score * 1000) / 10
+    : analysisResult?.ai_detection?.uncalibrated_margin !== undefined && analysisResult?.ai_detection?.uncalibrated_margin !== null
+    ? Math.round(analysisResult.ai_detection.uncalibrated_margin * 1000) / 10
     : 98.6;
 
   const filledPips = Math.min(10, Math.max(0, Math.round(confidenceScore / 10)));
@@ -174,9 +174,14 @@ export const ImageForensicsWorkspace: React.FC<ImageForensicsWorkspaceProps> = (
     : "99.9";
 
   const handleCopySummary = () => {
-    const text = `SECURA AI FORENSIC REPORT\n${caseId}: ${fileName}\nVerdict: ${
-      isAIGenerated ? "AI GENERATED" : "AUTHENTIC"
-    }\nConfidence: ${confidenceScore}%\nSHA-256: ${sha256Short}`;
+    const verdictText = isAIGenerated
+      ? "AI GENERATED"
+      : analysisResult?.canonical_verdict?.predicted_label === "CAMERA_CAPTURED"
+      ? "CAMERA CAPTURED"
+      : analysisResult?.canonical_verdict?.predicted_label === "INCONCLUSIVE"
+      ? "INCONCLUSIVE"
+      : "NO AI ARTIFACTS DETECTED (Unverified Origin)";
+    const text = `SECURA AI FORENSIC REPORT\n${caseId}: ${fileName}\nVerdict: ${verdictText}\nConfidence: ${confidenceScore}%\nSHA-256: ${sha256Short}`;
     navigator.clipboard.writeText(text);
     setCopiedSummary(true);
     setTimeout(() => setCopiedSummary(false), 2000);
@@ -218,7 +223,7 @@ export const ImageForensicsWorkspace: React.FC<ImageForensicsWorkspaceProps> = (
             </div>
 
             {/* Primary Action Cluster */}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={handleCopySummary}
@@ -248,7 +253,7 @@ export const ImageForensicsWorkspace: React.FC<ImageForensicsWorkspaceProps> = (
               <button
                 type="button"
                 onClick={() => alert("Transferred to Enterprise Moderation Center (Queue Priority #1)")}
-                className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-surface-container-lowest text-on-surface-variant hover:text-on-surface hover:bg-surface-container font-label-sm text-label-sm shadow-sm transition-all cursor-pointer"
+                className="hidden sm:flex items-center gap-1.5 h-8 px-3 rounded-lg bg-surface-container-lowest text-on-surface-variant hover:text-on-surface hover:bg-surface-container font-label-sm text-label-sm shadow-sm transition-all cursor-pointer"
               >
                 <span className="material-symbols-outlined text-base">shield_with_house</span>
                 <span>Send to Moderation</span>
@@ -260,7 +265,7 @@ export const ImageForensicsWorkspace: React.FC<ImageForensicsWorkspaceProps> = (
                 className="flex items-center gap-1.5 h-8 px-3.5 rounded-lg bg-primary text-on-primary hover:bg-[#d97322] font-label-sm text-label-sm shadow-sm transition-all cursor-pointer"
               >
                 <span className="material-symbols-outlined text-base">picture_as_pdf</span>
-                <span>Forensic Report (PDF)</span>
+                <span>Forensic PDF</span>
               </button>
             </div>
           </div>
@@ -299,7 +304,7 @@ export const ImageForensicsWorkspace: React.FC<ImageForensicsWorkspaceProps> = (
       </section>
 
       {/* Main Forensic Canvas Grid */}
-      <div className="max-w-[1440px] mx-auto w-full px-gutter-lg py-6 space-y-6">
+      <div className="max-w-[1440px] mx-auto w-full px-3 sm:px-gutter-lg py-4 sm:py-6 space-y-6 overflow-x-hidden">
         {analysisError && (
           <div className="p-4 rounded-xl bg-error/10 border border-error/20 text-error font-body-sm text-sm flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -320,9 +325,9 @@ export const ImageForensicsWorkspace: React.FC<ImageForensicsWorkspaceProps> = (
           {/* Interactive Scientific Image Inspector (8 cols) */}
           <div className="lg:col-span-8 flex flex-col bg-surface-container-lowest rounded-xl shadow-sm overflow-hidden border border-[#ded5c7]">
             {/* Inspector Ribbon */}
-            <div className="flex flex-wrap items-center justify-between gap-2 p-3 bg-surface-container-low border-b border-[#e6e2de]">
+            <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 sm:p-3 bg-surface-container-low border-b border-[#e6e2de]">
               {/* Spectral Layer Tabs */}
-              <div className="inline-flex p-0.5 rounded-lg bg-surface-container-high" role="tablist">
+              <div className="overflow-x-auto no-scrollbar max-w-full touch-pan-x inline-flex p-0.5 rounded-lg bg-surface-container-high shrink-0" role="tablist">
                 <button
                   type="button"
                   onClick={() => {
@@ -624,10 +629,24 @@ export const ImageForensicsWorkspace: React.FC<ImageForensicsWorkspaceProps> = (
                   </span>
                   <h2
                     className={`font-headline-md text-headline-md tracking-tight font-bold flex items-center gap-2 ${
-                      isAIGenerated ? "text-error" : "text-emerald-700"
+                      isAIGenerated
+                        ? "text-error"
+                        : analysisResult?.canonical_verdict?.predicted_label === "CAMERA_CAPTURED"
+                        ? "text-emerald-700"
+                        : analysisResult?.canonical_verdict?.predicted_label === "INCONCLUSIVE"
+                        ? "text-amber-600"
+                        : "text-blue-700"
                     }`}
                   >
-                    <span>{isAIGenerated ? "AI GENERATED" : "AUTHENTIC / REAL"}</span>
+                    <span>
+                      {isAIGenerated
+                        ? "AI GENERATED"
+                        : analysisResult?.canonical_verdict?.predicted_label === "CAMERA_CAPTURED"
+                        ? "CAMERA CAPTURED"
+                        : analysisResult?.canonical_verdict?.predicted_label === "INCONCLUSIVE"
+                        ? "INCONCLUSIVE"
+                        : "NO AI ARTIFACTS (Unverified Origin)"}
+                    </span>
                     <span className="material-symbols-outlined text-xl">gavel</span>
                   </h2>
                 </div>

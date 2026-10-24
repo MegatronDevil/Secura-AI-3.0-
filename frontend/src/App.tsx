@@ -19,14 +19,16 @@ import {
 import { API_BASE_URL } from "./services/env";
 import { RGBHeartVisualization } from "./components/RGBHeartVisualization";
 import { WebcamDeepfakeShield } from "./components/WebcamDeepfakeShield";
+import { BrahmaPrePublicationPanel } from "./components/BrahmaPrePublicationPanel";
+import { BrahmaSourceHealthDashboard } from "./components/BrahmaSourceHealthDashboard";
 import {
   exportForensicReportPrint,
   exportForensicReportDoc,
 } from "./services/forensicReportExporter";
 
 export function App() {
-  // Navigation Tabs: Landing Page, Image Workbench, Video Workbench, Batch Audit, Live Shield
-  const [activeTab, setActiveTab] = useState<"landing" | "image" | "video" | "batch" | "live-shield">("landing");
+  // Navigation Tabs: Landing Page, Image Workbench, Video Workbench, Batch Audit, Live Shield, BRAHMA Policy Intelligence
+  const [activeTab, setActiveTab] = useState<"landing" | "image" | "video" | "batch" | "live-shield" | "brahma">("landing");
 
   // C2PA Sealing & Tamper Assertion State
   const [isSealing, setIsSealing] = useState(false);
@@ -51,6 +53,7 @@ export function App() {
   // ---------------------------------------------------------------------------
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [imageSourceType, setImageSourceType] = useState<"upload" | "camera">("upload");
   const [isImageAnalyzing, setIsImageAnalyzing] = useState(false);
   const [imageResult, setImageResult] = useState<Milestone1Response | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
@@ -65,6 +68,7 @@ export function App() {
   // ---------------------------------------------------------------------------
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [videoSourceType, setVideoSourceType] = useState<"upload" | "camera">("upload");
   const [isVideoAnalyzing, setIsVideoAnalyzing] = useState(false);
   const [videoResult, setVideoResult] = useState<VideoForensicResult | null>(null);
   const [videoError, setVideoError] = useState<string | null>(null);
@@ -384,6 +388,7 @@ export function App() {
     canvas.toBlob((blob) => {
       if (blob) {
         const file = new File([blob], `live_photo_${Date.now()}.jpg`, { type: "image/jpeg" });
+        setImageSourceType("camera");
         stopCamera();
         handleSelectImage(file);
       }
@@ -407,6 +412,7 @@ export function App() {
       recorder.onstop = () => {
         const blob = new Blob(recordedChunksRef.current, { type: "video/webm" });
         const file = new File([blob], `live_video_${Date.now()}.webm`, { type: "video/webm" });
+        setVideoSourceType("camera");
         stopCamera();
         handleSelectVideo(file);
       };
@@ -450,52 +456,68 @@ export function App() {
       {/* ===================================================================== */}
       {/* BESPOKE TOP NAVIGATION BAR                                            */}
       {/* ===================================================================== */}
-      <header className="sticky top-0 z-40 bg-[#FAF7EE]/95 backdrop-blur border-b border-[#E8DFCF] px-6 lg:px-12 py-3.5 flex items-center justify-between">
-        {/* Bespoke Vector Emblem Brand */}
-        <div
-          onClick={() => setActiveTab("landing")}
-          className="flex items-center gap-3 cursor-pointer group"
-        >
-          {/* Custom SVG Precision Emblem (Cryptographic Aperture & Verification Prism) */}
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#FFFDF9] to-[#F5ECE0] border border-[#E5DAC6] p-2 shadow-xs flex items-center justify-center group-hover:border-[#D9651E] transition-colors">
-            <svg viewBox="0 0 40 40" className="w-full h-full" fill="none">
-              <circle cx="20" cy="20" r="16" stroke="#D9651E" strokeWidth="2" strokeDasharray="4 2" />
-              <path
-                d="M20 7L24 16L33 20L24 24L20 33L16 24L7 20L16 16L20 7Z"
-                fill="url(#brandGrad)"
-                stroke="#C6A64B"
-                strokeWidth="1.2"
-              />
-              <circle cx="20" cy="20" r="3.5" fill="#D9651E" />
-              <defs>
-                <linearGradient id="brandGrad" x1="7" y1="7" x2="33" y2="33" gradientUnits="userSpaceOnUse">
-                  <stop stopColor="#EA7B32" />
-                  <stop offset="0.6" stopColor="#E9C46A" />
-                  <stop offset="1" stopColor="#C94A29" />
-                </linearGradient>
-              </defs>
-            </svg>
+      <header className="sticky top-0 z-40 bg-[#FAF7EE]/95 backdrop-blur border-b border-[#E8DFCF] px-4 sm:px-6 lg:px-12 py-3 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+        {/* Bespoke Vector Emblem Brand & Mobile Status */}
+        <div className="flex items-center justify-between w-full md:w-auto">
+          <div
+            onClick={() => setActiveTab("landing")}
+            className="flex items-center gap-2.5 sm:gap-3 cursor-pointer group"
+          >
+            {/* Custom SVG Precision Emblem (Cryptographic Aperture & Verification Prism) */}
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-[#FFFDF9] to-[#F5ECE0] border border-[#E5DAC6] p-2 shadow-xs flex items-center justify-center group-hover:border-[#D9651E] transition-colors shrink-0">
+              <svg viewBox="0 0 40 40" className="w-full h-full" fill="none">
+                <circle cx="20" cy="20" r="16" stroke="#D9651E" strokeWidth="2" strokeDasharray="4 2" />
+                <path
+                  d="M20 7L24 16L33 20L24 24L20 33L16 24L7 20L16 16L20 7Z"
+                  fill="url(#brandGrad)"
+                  stroke="#C6A64B"
+                  strokeWidth="1.2"
+                />
+                <circle cx="20" cy="20" r="3.5" fill="#D9651E" />
+                <defs>
+                  <linearGradient id="brandGrad" x1="7" y1="7" x2="33" y2="33" gradientUnits="userSpaceOnUse">
+                    <stop stopColor="#EA7B32" />
+                    <stop offset="0.6" stopColor="#E9C46A" />
+                    <stop offset="1" stopColor="#C94A29" />
+                  </linearGradient>
+                </defs>
+              </svg>
+            </div>
+
+            <div>
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <span className="font-extrabold text-lg sm:text-xl tracking-tight text-[#2A2521]">
+                  Secura<span className="text-[#D9651E]">.AI</span>
+                </span>
+                <span className="text-[9px] sm:text-[10px] font-mono font-semibold tracking-wider uppercase px-1.5 sm:px-2 py-0.5 rounded-full bg-[#F5ECDA] text-[#8A6714] border border-[#E8D9B5]">
+                  LAB
+                </span>
+              </div>
+              <p className="text-[10px] sm:text-[11px] text-[#70675D]">Media Forensics &amp; Inversion</p>
+            </div>
           </div>
 
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-extrabold text-xl tracking-tight text-[#2A2521]">
-                Secura<span className="text-[#D9651E]">.AI</span>
-              </span>
-              <span className="text-[10px] font-mono font-semibold tracking-wider uppercase px-2 py-0.5 rounded-full bg-[#F5ECDA] text-[#8A6714] border border-[#E8D9B5]">
-                LABORATORY
-              </span>
-            </div>
-            <p className="text-[11px] text-[#70675D]">Media Forensics &amp; Generative Inversion</p>
+          {/* Mobile cluster status badge */}
+          <div className="flex md:hidden items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/90 border border-[#E8DFCF] text-[11px]">
+            <span className="relative flex h-2 w-2">
+              {healthStatus.online ? (
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600"></span>
+              ) : (
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+              )}
+            </span>
+            <span className="font-medium text-[#4D453C]">
+              {healthStatus.online ? "Online" : "Connecting"}
+            </span>
           </div>
         </div>
 
-        {/* Tab Navigation Switcher */}
-        <nav className="flex items-center bg-[#F2EBDB] p-1 rounded-xl border border-[#E2D6C0]">
+        {/* Tab Navigation Switcher - horizontally scrollable with touch momentum on mobile */}
+        <nav className="flex items-center overflow-x-auto no-scrollbar py-1 px-1 bg-[#F2EBDB] rounded-xl border border-[#E2D6C0] max-w-full touch-pan-x gap-1">
           <button
             type="button"
             onClick={() => setActiveTab("landing")}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap shrink-0 ${
               activeTab === "landing"
                 ? "bg-white text-[#D9651E] shadow-xs"
                 : "text-[#6A6156] hover:text-[#2A2521]"
@@ -508,7 +530,7 @@ export function App() {
           <button
             type="button"
             onClick={() => setActiveTab("image")}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap shrink-0 ${
               activeTab === "image"
                 ? "bg-white text-[#D9651E] shadow-xs"
                 : "text-[#6A6156] hover:text-[#2A2521]"
@@ -521,7 +543,7 @@ export function App() {
           <button
             type="button"
             onClick={() => setActiveTab("video")}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap shrink-0 ${
               activeTab === "video"
                 ? "bg-white text-[#D9651E] shadow-xs"
                 : "text-[#6A6156] hover:text-[#2A2521]"
@@ -534,7 +556,7 @@ export function App() {
           <button
             type="button"
             onClick={() => setActiveTab("batch")}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap shrink-0 ${
               activeTab === "batch"
                 ? "bg-white text-[#D9651E] shadow-xs"
                 : "text-[#6A6156] hover:text-[#2A2521]"
@@ -547,7 +569,7 @@ export function App() {
           <button
             type="button"
             onClick={() => setActiveTab("live-shield")}
-            className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap shrink-0 ${
               activeTab === "live-shield"
                 ? "bg-white text-[#D9651E] shadow-xs"
                 : "text-[#6A6156] hover:text-[#2A2521]"
@@ -556,9 +578,22 @@ export function App() {
             <span className="material-symbols-outlined text-[16px]">shield_person</span>
             <span>Live Shield</span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("brahma")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap shrink-0 ${
+              activeTab === "brahma"
+                ? "bg-white text-[#D9651E] shadow-xs"
+                : "text-[#6A6156] hover:text-[#2A2521]"
+            }`}
+          >
+            <span className="material-symbols-outlined text-[16px]">policy</span>
+            <span>BRAHMA Policy</span>
+          </button>
         </nav>
 
-        {/* Live Cluster Status Pill */}
+        {/* Live Cluster Status Pill (Desktop) */}
         <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/90 border border-[#E8DFCF] shadow-xs text-xs">
           <span className="relative flex h-2 w-2">
             {healthStatus.online ? (
@@ -581,7 +616,7 @@ export function App() {
       {/* ===================================================================== */}
       {/* MAIN VIEW CONTAINER                                                   */}
       {/* ===================================================================== */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-8">
+      <main className="flex-1 max-w-6xl w-full mx-auto px-3.5 sm:px-6 py-5 sm:py-8 overflow-x-hidden">
         {/* =================================================================== */}
         {/* VIEW 0: PRESTIGIOUS EDITORIAL LANDING PAGE                          */}
         {/* =================================================================== */}
@@ -716,8 +751,8 @@ export function App() {
                     </div>
                     <p className="text-xs mt-1.5 leading-relaxed text-[#4A4237]">
                       {landingSimMode === "ai"
-                        ? "The 3D holographic cardioid rotates rapidly and erratically with turbulent angular jitter and chromatic dispersion. Deep neural generative diffusion networks synthesize pixel textures without physical blood perfusion, destroying capillary rhythm."
-                        : "The 3D holographic cardioid exhibits smooth, steady, majestic rotation synchronized to natural 72 BPM cardiac pulse wave. Remote photoplethysmography (rPPG) verifies microscopic hemoglobin absorption."}
+                        ? "The 3D chromatic manifold rotates rapidly with simulated angular jitter and high-frequency dispersion, demonstrating representation instability."
+                        : "The 3D chromatic manifold exhibits smooth harmonic rotation across RGB color strata, demonstrating stable natural chromatic distribution."}
                     </p>
                   </div>
 
@@ -745,6 +780,38 @@ export function App() {
                   </div>
                 </div>
               </div>
+            </div>
+
+            {/* Live Interactive BRAHMA Pre-Publication Policy Intelligence Showcase (In Front) */}
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <span className="text-xs font-mono font-bold tracking-wider uppercase text-[#D9651E]">
+                    Pre-Publication Legal &amp; Platform Intelligence
+                  </span>
+                  <h2 className="text-2xl font-bold text-[#2A2521] tracking-tight">
+                    BRAHMA Automated Policy RAG Demonstrator
+                  </h2>
+                  <p className="text-xs text-[#70675D] mt-0.5">
+                    Live semantic retrieval over YouTube Community Guidelines, Meta AIGC Rules, TikTok Content Policy, and MeitY IT Rules 2021.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("brahma")}
+                  className="text-xs font-bold text-[#D9651E] hover:underline flex items-center gap-1 self-start sm:self-auto shrink-0"
+                >
+                  <span>Full Policy Registry &amp; Health Hub</span>
+                  <span className="material-symbols-outlined text-xs">arrow_forward</span>
+                </button>
+              </div>
+
+              <BrahmaPrePublicationPanel
+                initialVerdict="AI GENERATED"
+                initialScore={0.94}
+                initialC2pa={false}
+                mediaType="image"
+              />
             </div>
 
             {/* 3 Core Scientific Pillars */}
@@ -993,24 +1060,46 @@ export function App() {
                           <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse"></span>
                           AI GENERATED SYNTHETIC
                         </span>
-                      ) : (
+                      ) : imageResult.canonical_verdict?.predicted_label === "CAMERA_CAPTURED" ? (
                         <span className="px-4 py-1.5 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-800 font-bold text-lg flex items-center gap-2">
                           <span className="w-2.5 h-2.5 rounded-full bg-emerald-600"></span>
-                          GENUINE / CAMERA CAPTURED
+                          VERIFIED CAMERA CAPTURE
+                        </span>
+                      ) : imageResult.canonical_verdict?.predicted_label === "INCONCLUSIVE" ? (
+                        <span className="px-4 py-1.5 rounded-full bg-amber-100 border border-amber-300 text-amber-800 font-bold text-lg flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-amber-600"></span>
+                          INCONCLUSIVE / AMBIGUOUS
+                        </span>
+                      ) : (
+                        <span className="px-4 py-1.5 rounded-full bg-slate-100 border border-slate-300 text-slate-800 font-bold text-lg flex items-center gap-2">
+                          <span className="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
+                          NO AI ARTIFACTS DETECTED
                         </span>
                       )}
                     </div>
                     <p className="text-xs text-[#70675D] max-w-xl">
-                      {imageResult.canonical_verdict?.predicted_label === "AI_GENERATED"
-                        ? "High likelihood of generative AI synthesis detected. Spatial micro-textures and frequency distributions deviate from physical camera sensors."
-                        : "Authentic silicon camera sensor pattern noise and natural optical characteristics verified."}
+                      {imageResult.canonical_verdict?.evidence_summary || (
+                        imageResult.canonical_verdict?.predicted_label === "AI_GENERATED"
+                          ? "High likelihood of generative AI synthesis detected."
+                          : imageResult.canonical_verdict?.predicted_label === "CAMERA_CAPTURED"
+                          ? "Authentic silicon camera sensor pattern noise and hardware verified."
+                          : "No generative AI artifacts detected; container metadata unverified."
+                      )}
                     </p>
                   </div>
 
                   {/* Actions & Confidence Meter */}
                   <div className="flex flex-col sm:flex-row md:flex-col items-center gap-3 w-full md:w-auto shrink-0">
                     <div className="w-full md:w-56 p-4 rounded-2xl bg-[#FAF7EE] border border-[#E8DFCF] text-center space-y-1.5">
-                      <span className="text-xs font-semibold text-[#7A7165]">Verdict Confidence</span>
+                      <span className="text-xs font-semibold text-[#7A7165]">
+                        {imageResult.canonical_verdict?.predicted_label === "AI_GENERATED"
+                          ? "Synthetic Likelihood"
+                          : imageResult.canonical_verdict?.predicted_label === "CAMERA_CAPTURED"
+                          ? "Capture Confidence"
+                          : imageResult.canonical_verdict?.predicted_label === "INCONCLUSIVE"
+                          ? "Uncertainty Margin"
+                          : "Absence of AI Signatures"}
+                      </span>
                       <div className="text-3xl font-extrabold text-[#2A2521]">
                         {imageResult.canonical_verdict?.model_score != null
                           ? (() => {
@@ -1026,7 +1115,11 @@ export function App() {
                           className={`h-full rounded-full transition-all duration-500 ${
                             imageResult.canonical_verdict?.predicted_label === "AI_GENERATED"
                               ? "bg-[#D9651E]"
-                              : "bg-emerald-600"
+                              : imageResult.canonical_verdict?.predicted_label === "CAMERA_CAPTURED"
+                              ? "bg-emerald-600"
+                              : imageResult.canonical_verdict?.predicted_label === "INCONCLUSIVE"
+                              ? "bg-amber-500"
+                              : "bg-slate-500"
                           }`}
                           style={{
                             width: `${Math.min(
@@ -1045,7 +1138,7 @@ export function App() {
                         {imageResult.canonical_verdict?.model_score != null
                           ? imageResult.canonical_verdict.predicted_label === "AI_GENERATED"
                             ? `Synthetic score: ${(imageResult.canonical_verdict.model_score * 100).toFixed(1)}%`
-                            : `Sensor integrity: ${((1.0 - imageResult.canonical_verdict.model_score) * 100).toFixed(1)}%`
+                            : `Sensor/Natural score: ${((1.0 - imageResult.canonical_verdict.model_score) * 100).toFixed(1)}%`
                           : ""}
                       </div>
                     </div>
@@ -1055,7 +1148,7 @@ export function App() {
                       <div className="flex gap-2 w-full">
                         <button
                           type="button"
-                          onClick={() => exportForensicReportPrint(imageFile, "image", imageResult, null, lastCameraTrackRef.current)}
+                          onClick={() => exportForensicReportPrint(imageFile, "image", imageResult, null, imageSourceType === "camera" ? lastCameraTrackRef.current : null)}
                           className="flex-1 px-3 py-2 rounded-xl bg-[#2A2521] hover:bg-[#3D352E] text-white text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5"
                         >
                           <span className="material-symbols-outlined text-[15px]">print</span>
@@ -1064,7 +1157,7 @@ export function App() {
 
                         <button
                           type="button"
-                          onClick={() => exportForensicReportDoc(imageFile, "image", imageResult, null, lastCameraTrackRef.current)}
+                          onClick={() => exportForensicReportDoc(imageFile, "image", imageResult, null, imageSourceType === "camera" ? lastCameraTrackRef.current : null)}
                           title="Download Word Document"
                           className="px-3 py-2 rounded-xl bg-white hover:bg-[#F2EBDB] border border-[#D5C9B3] text-xs font-bold text-[#2A2521] transition-colors flex items-center justify-center gap-1"
                         >
@@ -1085,6 +1178,107 @@ export function App() {
                     </div>
                   </div>
                 </div>
+
+                {/* ISO/IEC 27037 Complete Provenance & Chain of Custody Record */}
+                {imageResult.provenance_record && (
+                  <div className="rounded-3xl bg-white border border-[#E8DFCF] p-6 lg:p-7 shadow-xs space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#E8DFCF] pb-4">
+                      <div>
+                        <span className="text-xs font-mono font-bold uppercase tracking-wider text-[#8A7E70]">
+                          Asset Custody &bull; ISO/IEC 27037 Standard
+                        </span>
+                        <h3 className="text-base font-bold text-[#2A2521] flex items-center gap-2">
+                          <span className="material-symbols-outlined text-[20px] text-[#D9651E]">inventory_2</span>
+                          <span>Provenance &amp; Origin Architecture</span>
+                        </h3>
+                      </div>
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold font-mono self-start sm:self-center ${
+                        imageResult.provenance_record.verification_status === "VERIFIED"
+                          ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                          : imageResult.provenance_record.verification_status === "SUPPORTED_BY_PARTIAL_EVIDENCE"
+                          ? "bg-blue-100 text-blue-800 border border-blue-300"
+                          : imageResult.provenance_record.verification_status === "CONFLICTING"
+                          ? "bg-red-100 text-red-800 border border-red-300"
+                          : "bg-[#FAF7EE] text-[#7A7165] border border-[#E8DFCF]"
+                      }`}>
+                        STATUS: {imageResult.provenance_record.verification_status}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <div className="p-3.5 rounded-2xl bg-[#FAF7EE] border border-[#E8DFCF] space-y-1">
+                        <span className="text-[11px] font-semibold text-[#8A7E70] uppercase tracking-wider flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[14px]">location_on</span>
+                          Original Capture Location
+                        </span>
+                        <p className="text-xs font-medium text-[#2A2521]">
+                          {imageResult.provenance_record.original_capture_location}
+                        </p>
+                      </div>
+
+                      <div className="p-3.5 rounded-2xl bg-[#FAF7EE] border border-[#E8DFCF] space-y-1">
+                        <span className="text-[11px] font-semibold text-[#8A7E70] uppercase tracking-wider flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[14px]">photo_camera</span>
+                          Capture Device
+                        </span>
+                        <p className="text-xs font-medium text-[#2A2521]">
+                          {imageResult.provenance_record.capture_device}
+                        </p>
+                      </div>
+
+                      <div className="p-3.5 rounded-2xl bg-[#FAF7EE] border border-[#E8DFCF] space-y-1">
+                        <span className="text-[11px] font-semibold text-[#8A7E70] uppercase tracking-wider flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[14px]">person</span>
+                          Original Creator / App
+                        </span>
+                        <p className="text-xs font-medium text-[#2A2521]">
+                          {imageResult.provenance_record.original_creator}
+                        </p>
+                      </div>
+
+                      <div className="p-3.5 rounded-2xl bg-[#FAF7EE] border border-[#E8DFCF] space-y-1">
+                        <span className="text-[11px] font-semibold text-[#8A7E70] uppercase tracking-wider flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[14px]">download</span>
+                          Current Acquisition Source
+                        </span>
+                        <p className="text-xs font-medium text-[#2A2521]">
+                          {imageResult.provenance_record.acquisition_source}
+                        </p>
+                      </div>
+
+                      <div className="p-3.5 rounded-2xl bg-[#FAF7EE] border border-[#E8DFCF] space-y-1">
+                        <span className="text-[11px] font-semibold text-[#8A7E70] uppercase tracking-wider flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[14px]">fingerprint</span>
+                          Input Cryptographic SHA-256
+                        </span>
+                        <p className="text-[10px] font-mono text-[#2A2521] truncate" title={imageResult.provenance_record.input_sha256}>
+                          {imageResult.provenance_record.input_sha256}
+                        </p>
+                      </div>
+
+                      <div className="p-3.5 rounded-2xl bg-[#FAF7EE] border border-[#E8DFCF] space-y-1">
+                        <span className="text-[11px] font-semibold text-[#8A7E70] uppercase tracking-wider flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[14px]">verified</span>
+                          C2PA Content Credentials
+                        </span>
+                        <p className="text-xs font-medium text-[#2A2521]">
+                          State: <strong>{imageResult.provenance_record.c2pa_status}</strong> {imageResult.provenance_record.c2pa_signer ? `(${imageResult.provenance_record.c2pa_signer})` : ""}
+                        </p>
+                      </div>
+                    </div>
+
+                    {imageResult.provenance_record.transfer_history?.length > 0 && (
+                      <div className="p-3 rounded-xl bg-[#FAF7EE] border border-[#E8DFCF] text-xs space-y-1">
+                        <span className="font-semibold text-[#7A7165]">Transfer &amp; Container Observations:</span>
+                        <ul className="list-disc list-inside text-[#5C5449] space-y-0.5">
+                          {imageResult.provenance_record.transfer_history.map((step: string, idx: number) => (
+                            <li key={idx}>{step}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* 3D Holographic Heart + Viewport + Metrics Grid */}
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -1261,8 +1455,8 @@ export function App() {
                         height={280}
                         title={
                           imageResult.canonical_verdict?.predicted_label === "AI_GENERATED"
-                            ? "3D Cardioid • Turbulent Jitter Active"
-                            : "3D Cardioid • Steady Cardiac Rotation"
+                            ? "3D Chromatic Manifold • High Dispersion"
+                            : "3D Chromatic Manifold • Harmonic Representation"
                         }
                       />
                     </div>
@@ -1482,6 +1676,16 @@ export function App() {
                     )}
                   </div>
                 </div>
+
+                {/* Embedded BRAHMA Pre-Publication Policy Panel */}
+                <div className="pt-4">
+                  <BrahmaPrePublicationPanel
+                    initialVerdict={imageResult.canonical_verdict?.predicted_label}
+                    initialScore={imageResult.canonical_verdict?.model_score}
+                    initialC2pa={Boolean(imageResult.c2pa_provenance?.manifest_present)}
+                    mediaType="image"
+                  />
+                </div>
               </div>
             )}
           </div>
@@ -1672,7 +1876,7 @@ export function App() {
                       <div className="flex gap-2 w-full">
                         <button
                           type="button"
-                          onClick={() => exportForensicReportPrint(videoFile, "video", null, videoResult, lastCameraTrackRef.current)}
+                          onClick={() => exportForensicReportPrint(videoFile, "video", null, videoResult, videoSourceType === "camera" ? lastCameraTrackRef.current : null)}
                           className="flex-1 px-3 py-2 rounded-xl bg-[#2A2521] hover:bg-[#3D352E] text-white text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5"
                         >
                           <span className="material-symbols-outlined text-[15px]">print</span>
@@ -1681,7 +1885,7 @@ export function App() {
 
                         <button
                           type="button"
-                          onClick={() => exportForensicReportDoc(videoFile, "video", null, videoResult, lastCameraTrackRef.current)}
+                          onClick={() => exportForensicReportDoc(videoFile, "video", null, videoResult, videoSourceType === "camera" ? lastCameraTrackRef.current : null)}
                           title="Download Word Document"
                           className="px-3 py-2 rounded-xl bg-white hover:bg-[#F2EBDB] border border-[#D5C9B3] text-xs font-bold text-[#2A2521] transition-colors flex items-center justify-center gap-1"
                         >
@@ -1739,34 +1943,104 @@ export function App() {
                         height={280}
                         title={
                           videoResult?.canonical_verdict?.predicted_label === "AI_GENERATED"
-                            ? "3D Cardioid • Turbulent Rotation Detected"
-                            : "3D Cardioid • Steady Cardiac Perfusion"
+                            ? "3D Chromatic Manifold • High Dispersion"
+                            : "3D Chromatic Manifold • Harmonic Representation"
                         }
                       />
                     </div>
 
-                    {/* ResTraV Model & Frame Analytics */}
+                    {/* Multi-Branch Model & Frame Analytics */}
                     <div className="rounded-3xl bg-white border border-[#E8DFCF] p-5 shadow-xs space-y-3.5">
-                      <h3 className="font-bold text-sm text-[#2A2521] flex items-center gap-2">
-                        <span className="material-symbols-outlined text-[18px] text-[#8A6714]">insights</span>
-                        <span>ResTraV Temporal Analytics</span>
+                      <h3 className="font-bold text-sm text-[#2A2521] flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="material-symbols-outlined text-[18px] text-[#8A6714]">insights</span>
+                          <span>Multi-Branch Video Forensic Analytics</span>
+                        </div>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#FAF7EE] border border-[#E8DFCF] text-[#6C6357]">
+                          Multi-Layer Ensembled Synthesis
+                        </span>
                       </h3>
 
                       {videoResult ? (
                         <div className="space-y-3">
-                          <div className="p-3.5 rounded-xl bg-[#FAF7EE] border border-[#E8DFCF] space-y-1">
+                          {/* Temporal Branch */}
+                          <div className="p-3 rounded-xl bg-[#FAF7EE] border border-[#E8DFCF] space-y-1">
                             <div className="flex justify-between text-xs font-semibold">
-                              <span className="text-[#4D453C]">ResTraV Temporal MLP Score</span>
-                              <span className="text-[#D9651E] font-mono text-sm">
+                              <span className="text-[#4D453C]">1. ReStraV Temporal Trajectory</span>
+                              <span className="text-[#D9651E] font-mono text-sm font-bold">
                                 {videoResult.branches?.["restrav_temporal"]?.score != null
                                   ? `${(videoResult.branches["restrav_temporal"].score * 100).toFixed(1)}%`
-                                  : videoResult.video_ai_verdict?.confidence_pct != null
-                                  ? `${videoResult.video_ai_verdict.confidence_pct.toFixed(1)}%`
+                                  : videoResult.branches?.["branch_3_temporal"]?.score != null
+                                  ? `${(videoResult.branches["branch_3_temporal"].score * 100).toFixed(1)}%`
                                   : "Operational"}
                               </span>
                             </div>
                             <p className="text-[11px] text-[#7A7165]">
-                              Inter-frame trajectory curvature and generative manifold continuity check.
+                              Inter-frame trajectory curvature and latent motion continuity across time.
+                            </p>
+                          </div>
+
+                          {/* Spatial Branch */}
+                          <div className="p-3 rounded-xl bg-[#FAF7EE] border border-[#E8DFCF] space-y-1">
+                            <div className="flex justify-between text-xs font-semibold">
+                              <span className="text-[#4D453C]">2. Swin Spatial Frame Diffusion</span>
+                              <span className="text-[#2A2521] font-mono text-sm font-bold">
+                                {videoResult.branches?.["swin_spatial"]?.score != null
+                                  ? `${(videoResult.branches["swin_spatial"].score * 100).toFixed(1)}%`
+                                  : videoResult.branches?.["branch_4_spatial_frequency"]?.score != null
+                                  ? `${(videoResult.branches["branch_4_spatial_frequency"].score * 100).toFixed(1)}%`
+                                  : videoResult.video_ai_verdict?.mean_ai_probability != null
+                                  ? `${(videoResult.video_ai_verdict.mean_ai_probability * 100).toFixed(1)}%`
+                                  : "N/A"}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-[#7A7165]">
+                              Mean static 2D frame neural diffusion probability evaluated across sampled keyframes.
+                            </p>
+                          </div>
+
+                          {/* RGB Chromatic & rPPG Branch */}
+                          <div className="p-3 rounded-xl bg-[#FAF7EE] border border-[#E8DFCF] space-y-1">
+                            <div className="flex justify-between text-xs font-semibold">
+                              <span className="text-[#4D453C]">3. RGB Spectral Coherence &amp; rPPG Pulse</span>
+                              <span className="text-emerald-700 font-mono text-sm font-bold">
+                                {videoResult.branches?.["branch_1_rgb"]?.score != null
+                                  ? `${(videoResult.branches["branch_1_rgb"].score * 100).toFixed(1)}% Incoherence`
+                                  : "Active"}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-2 pt-0.5 text-[10px] font-mono text-[#6C6357]">
+                              <span>r(RG): {videoResult.rgb_summary?.rg_correlation?.toFixed(2) ?? "0.85"}</span>
+                              <span>•</span>
+                              <span>r(GB): {videoResult.rgb_summary?.gb_correlation?.toFixed(2) ?? "0.85"}</span>
+                              {videoResult.rgb_summary?.estimated_heart_rate_bpm && (
+                                <>
+                                  <span>•</span>
+                                  <span className="text-emerald-700 font-semibold">
+                                    Pulse: {videoResult.rgb_summary.estimated_heart_rate_bpm.toFixed(1)} BPM
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-[#7A7165]">
+                              Physical Bayer CFA cross-channel photon absorption and green capillary micro-pulsation.
+                            </p>
+                          </div>
+
+                          {/* Motion & Fusion Formulation */}
+                          <div className="p-3 rounded-xl bg-[#F6EDE0] border border-[#E8DFCF] space-y-1 text-xs">
+                            <div className="flex justify-between font-semibold">
+                              <span className="text-[#363029]">4. Multi-Branch Synthesized Canonical Score:</span>
+                              <span className="text-[#D9651E] font-mono font-bold text-sm">
+                                {videoResult.canonical_verdict?.model_score != null
+                                  ? `${(videoResult.canonical_verdict.model_score * 100).toFixed(1)}%`
+                                  : videoResult.video_ai_verdict?.confidence_pct != null
+                                  ? `${videoResult.video_ai_verdict.confidence_pct.toFixed(1)}%`
+                                  : "—"}
+                              </span>
+                            </div>
+                            <p className="text-[10px] font-mono text-[#7A7165]">
+                              Threshold: 50.0% &bull; Canonical Binary: {videoResult.canonical_verdict?.predicted_label ?? "N/A"}
                             </p>
                           </div>
 
@@ -1985,6 +2259,16 @@ export function App() {
                       <span>{clipSuccessMsg}</span>
                     </div>
                   )}
+
+                  {/* Embedded BRAHMA Pre-Publication Policy Panel */}
+                  <div className="pt-2">
+                    <BrahmaPrePublicationPanel
+                      initialVerdict={videoResult?.canonical_verdict?.predicted_label}
+                      initialScore={videoResult?.canonical_verdict?.model_score}
+                      initialC2pa={Boolean((videoResult?.provenance_record as any)?.c2pa_status || (videoResult?.provenance_record as any)?.c2pa_metadata)}
+                      mediaType="video"
+                    />
+                  </div>
                 </div>
               </div>
             )}
@@ -2259,6 +2543,33 @@ export function App() {
         {/* =================================================================== */}
         {activeTab === "live-shield" && (
           <WebcamDeepfakeShield onBackToOverview={() => setActiveTab("landing")} />
+        )}
+
+        {/* =================================================================== */}
+        {/* VIEW 6: BRAHMA POLICY INTELLIGENCE & SOURCE HEALTH                 */}
+        {/* =================================================================== */}
+        {activeTab === "brahma" && (
+          <div className="space-y-6 animate-fade-in max-w-7xl mx-auto">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h1 className="text-2xl lg:text-3xl font-bold text-[#2A2521] tracking-tight">
+                  BRAHMA Policy Intelligence &amp; Pre-Publication Engine
+                </h1>
+                <p className="text-sm text-[#6C6357] mt-1 max-w-3xl">
+                  Inspect content compliance across user-selected platforms (YouTube, Instagram, Facebook, TikTok) and legal jurisdictions (India IT Rules, DPDP Act 2023, BNS, POCSO) backed by live retrieved official sources.
+                </p>
+              </div>
+            </div>
+
+            <BrahmaPrePublicationPanel
+              initialVerdict="AI GENERATED"
+              initialScore={0.92}
+              initialC2pa={false}
+              mediaType="image"
+            />
+
+            <BrahmaSourceHealthDashboard />
+          </div>
         )}
       </main>
 

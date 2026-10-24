@@ -6,6 +6,7 @@
   let lastContextMenuPos = null;
   let lastScanData = null;
   let consecutiveStrikes = 0;
+  let lastInspectedMediaUrl = null;
 
   // Track the exact element and coordinates the user right-clicked
   document.addEventListener("contextmenu", (e) => {
@@ -26,6 +27,26 @@
       return;
     }
 
+    if (request.type === "SECURA_CAPTURE_VIDEO_STREAM") {
+      const mediaInfo = findBestMediaTarget();
+      const targetVideo = (mediaInfo && mediaInfo.mediaType === "video" && mediaInfo.element)
+        ? mediaInfo.element
+        : findActiveReelVideo();
+
+      if (targetVideo) {
+        showLoadingToast("Secura AI: Analyzing Reel (temporal video capture)...");
+        captureReelVideoStream(targetVideo, 1800).then((streamData) => {
+          sendResponse(streamData || { rect: getBoundingBox(targetVideo) });
+        }).catch((err) => {
+          sendResponse({ error: String(err), rect: getBoundingBox(targetVideo) });
+        });
+        return true;
+      } else {
+        sendResponse({ error: "No video element found to capture." });
+        return true;
+      }
+    }
+
     if (request.type === "SECURA_EXTRACT_ASSET_DATA_URL") {
       const mediaInfo = findBestMediaTarget();
       const dataUrl = extractDataUrl(mediaInfo?.element);
@@ -34,7 +55,7 @@
     }
 
     if (request.type === "SECURA_SCAN_STARTING") {
-      showLoadingToast();
+      showLoadingToast(request.message);
     } else if (request.type === "SECURA_SCAN_COMPLETE") {
       lastScanData = request.data;
       renderForensicCard(request.data, request.srcUrl);
@@ -58,87 +79,197 @@
     }
   });
 
-  // Find media under cursor, penetrating transparent overlays (e.g. Instagram, Twitter)
+  // Detect whether current page is a dedicated Reel/Shorts video page
+  function isReelOrVideoContext() {
+    try {
+      const href = window.location.href.toLowerCase();
+      const path = window.location.pathname.toLowerCase();
+      return path.includes("/reel/") || 
+             path.includes("/reels/") || 
+             path.includes("/shorts/") || 
+             href.includes("tiktok.com") || 
+             path.includes("/watch");
+    } catch {
+      return false;
+    }
+  }
+
+  // Find the primary or playing Reel/Video on page
+  function findActiveReelVideo() {
+    const videos = Array.from(document.querySelectorAll("video"));
+    if (videos.length === 0) return null;
+
+    // 1. Prioritize currently playing video
+    const playing = videos.find(v => !v.paused && !v.ended && v.readyState >= 2);
+    if (playing) return playing;
+
+    // 2. Pick video largest in viewport
+    let bestVid = null;
+    let maxArea = 0;
+    for (const v of videos) {
+      const rect = v.getBoundingClientRect();
+      const inView = rect.top < window.innerHeight && rect.bottom > 0 && rect.left < window.innerWidth && rect.right > 0;
+      if (inView) {
+        const area = rect.width * rect.height;
+        if (area > maxArea) {
+          maxArea = area;
+          bestVid = v;
+        }
+      }
+    }
+    return bestVid || videos[0];
+  }
+
+  // Extract metadata and stream information for a detected video/Reel element
+  function extractVideoTarget(videoEl) {
+    if (!videoEl) return null;
+
+    let directUrl = null;
+    if (videoEl.currentSrc && videoEl.currentSrc.startsWith("http")) {
+      directUrl = videoEl.currentSrc;
+    } else if (videoEl.src && videoEl.src.startsWith("http")) {
+      directUrl = videoEl.src;
+    } else {
+      const srcEl = videoEl.querySelector("source[src^='http']");
+      if (srcEl && srcEl.src) directUrl = srcEl.src;
+    }
+
+    const thumbData = captureVideoFrame(videoEl);
+
+    return {
+      element: videoEl,
+      mediaUrl: directUrl || (videoEl.currentSrc || videoEl.src || "in-page-reel-video"),
+      mediaType: "video",
+      isDirectVideoUrl: !!directUrl,
+      isBlobOrMse: !directUrl,
+      thumbDataUrl: thumbData,
+      rect: getBoundingBox(videoEl)
+    };
+  }
+
+  // Find media under cursor, prioritizing image targets over background video containers
   function findBestMediaTarget() {
+    const isReelPage = isReelOrVideoContext();
+
+    // Priority 1: Scan elements at context-menu position
     if (lastContextMenuPos && typeof document.elementsFromPoint === "function") {
       try {
         const elements = document.elementsFromPoint(lastContextMenuPos.x, lastContextMenuPos.y);
+
+        // Pass 1A: Check for IMG elements or background images FIRST
+        // If the click is over a photograph, it is ALWAYS an image target.
         for (const el of elements) {
-          const match = inspectElementForMedia(el);
-          if (match) return match;
+          if (el.tagName === "IMG") {
+            const url = el.currentSrc || el.src || parseSrcset(el.srcset);
+            if (url && isValidMediaUrl(url)) {
+              return { element: el, mediaUrl: url, mediaType: "image", rect: getBoundingBox(el) };
+            }
+          }
+          const imgChild = el.querySelector("img");
+          if (imgChild) {
+            const url = imgChild.currentSrc || imgChild.src || parseSrcset(imgChild.srcset);
+            if (url && isValidMediaUrl(url)) {
+              const r = getBoundingBox(imgChild);
+              if (r && r.width >= 30 && r.height >= 30) {
+                return { element: imgChild, mediaUrl: url, mediaType: "image", rect: r };
+              }
+            }
+          }
+          try {
+            const bg = window.getComputedStyle(el).backgroundImage;
+            if (bg && bg.startsWith("url(")) {
+              const clean = bg.slice(4, -1).replace(/["']/g, "");
+              if (clean && isValidMediaUrl(clean)) {
+                return { element: el, mediaUrl: clean, mediaType: "image", rect: getBoundingBox(el) };
+              }
+            }
+          } catch {}
+        }
+
+        // Pass 1B: Look for VIDEO elements only if no image was under the cursor
+        for (const el of elements) {
+          if (el.tagName === "VIDEO") {
+            return extractVideoTarget(el);
+          }
+          const vidChild = el.querySelector("video");
+          if (vidChild) {
+            const vRect = vidChild.getBoundingClientRect();
+            if (lastContextMenuPos.x >= vRect.left && lastContextMenuPos.x <= vRect.right &&
+                lastContextMenuPos.y >= vRect.top && lastContextMenuPos.y <= vRect.bottom) {
+              return extractVideoTarget(vidChild);
+            }
+          }
+        }
+
+        // Pass 1C: If on a dedicated Reel page, locate the active Reel video
+        if (isReelPage) {
+          const activeVid = findActiveReelVideo();
+          if (activeVid) {
+            const vRect = activeVid.getBoundingClientRect();
+            if (lastContextMenuPos.x >= vRect.left - 40 && lastContextMenuPos.x <= vRect.right + 40 &&
+                lastContextMenuPos.y >= vRect.top - 40 && lastContextMenuPos.y <= vRect.bottom + 40) {
+              return extractVideoTarget(activeVid);
+            }
+          }
         }
       } catch (err) {
-        console.warn("elementsFromPoint note:", err);
+        console.warn("elementsFromPoint scan notice:", err);
       }
     }
 
+    // Priority 2: Traverse ancestry of last right-clicked element
     if (lastRightClickedElement) {
-      const match = inspectElementForMedia(lastRightClickedElement);
-      if (match) return match;
-
-      let parent = lastRightClickedElement.parentElement;
-      for (let i = 0; i < 6 && parent; i++) {
-        const childMatch = inspectElementForMedia(parent);
-        if (childMatch) return childMatch;
-        parent = parent.parentElement;
-      }
-    }
-
-    return null;
-  }
-
-  function inspectElementForMedia(el) {
-    if (!el) return null;
-
-    if (el.tagName === "IMG") {
-      const url = el.currentSrc || el.src || parseSrcset(el.srcset);
-      if (url && isValidMediaUrl(url)) {
-        return { element: el, mediaUrl: url, mediaType: "image", rect: getBoundingBox(el) };
-      }
-    }
-
-    if (el.tagName === "VIDEO") {
-      const frameData = captureVideoFrame(el);
-      const url = el.currentSrc || el.src || el.querySelector("source")?.src;
-      return {
-        element: el,
-        mediaUrl: frameData || url,
-        mediaType: "video",
-        isDataUrl: !!frameData,
-        rect: getBoundingBox(el)
-      };
-    }
-
-    const imgChild = el.querySelector("img");
-    if (imgChild) {
-      const url = imgChild.currentSrc || imgChild.src || parseSrcset(imgChild.srcset);
-      if (url && isValidMediaUrl(url)) {
-        return { element: imgChild, mediaUrl: url, mediaType: "image", rect: getBoundingBox(imgChild) };
-      }
-    }
-
-    const vidChild = el.querySelector("video");
-    if (vidChild) {
-      const frameData = captureVideoFrame(vidChild);
-      const url = vidChild.currentSrc || vidChild.src || vidChild.querySelector("source")?.src;
-      return {
-        element: vidChild,
-        mediaUrl: frameData || url,
-        mediaType: "video",
-        isDataUrl: !!frameData,
-        rect: getBoundingBox(vidChild)
-      };
-    }
-
-    try {
-      const bg = window.getComputedStyle(el).backgroundImage;
-      if (bg && bg.startsWith("url(")) {
-        const clean = bg.slice(4, -1).replace(/["']/g, "");
-        if (clean && isValidMediaUrl(clean)) {
-          return { element: el, mediaUrl: clean, mediaType: "image", rect: getBoundingBox(el) };
+      // Check for image first
+      let el = lastRightClickedElement;
+      for (let i = 0; i < 8 && el; i++) {
+        if (el.tagName === "IMG") {
+          const url = el.currentSrc || el.src || parseSrcset(el.srcset);
+          if (url && isValidMediaUrl(url)) {
+            return { element: el, mediaUrl: url, mediaType: "image", rect: getBoundingBox(el) };
+          }
         }
+        const img = el.querySelector("img");
+        if (img) {
+          const url = img.currentSrc || img.src || parseSrcset(img.srcset);
+          if (url && isValidMediaUrl(url)) {
+            return { element: img, mediaUrl: url, mediaType: "image", rect: getBoundingBox(img) };
+          }
+        }
+        try {
+          const bg = window.getComputedStyle(el).backgroundImage;
+          if (bg && bg.startsWith("url(")) {
+            const clean = bg.slice(4, -1).replace(/["']/g, "");
+            if (clean && isValidMediaUrl(clean)) {
+              return { element: el, mediaUrl: clean, mediaType: "image", rect: getBoundingBox(el) };
+            }
+          }
+        } catch {}
+        el = el.parentElement;
       }
-    } catch {}
+
+      // Check for video only if click point is inside video
+      el = lastRightClickedElement;
+      for (let i = 0; i < 8 && el; i++) {
+        if (el.tagName === "VIDEO") {
+          return extractVideoTarget(el);
+        }
+        const vid = el.querySelector("video");
+        if (vid) {
+          const vRect = vid.getBoundingClientRect();
+          if (!lastContextMenuPos || (lastContextMenuPos.x >= vRect.left && lastContextMenuPos.x <= vRect.right &&
+              lastContextMenuPos.y >= vRect.top && lastContextMenuPos.y <= vRect.bottom)) {
+            return extractVideoTarget(vid);
+          }
+        }
+        el = el.parentElement;
+      }
+
+      // If Reel page, fallback to active video
+      if (isReelPage) {
+        const activeVid = findActiveReelVideo();
+        if (activeVid) return extractVideoTarget(activeVid);
+      }
+    }
 
     return null;
   }
@@ -166,7 +297,9 @@
       left: Math.round(r.left),
       width: Math.round(r.width),
       height: Math.round(r.height),
-      dpr: window.devicePixelRatio || 1
+      dpr: window.devicePixelRatio || 1,
+      windowWidth: window.innerWidth || document.documentElement.clientWidth || 0,
+      windowHeight: window.innerHeight || document.documentElement.clientHeight || 0
     };
   }
 
@@ -178,12 +311,176 @@
         canvas.height = Math.round((canvas.width * vid.videoHeight) / vid.videoWidth);
         const ctx = canvas.getContext("2d");
         ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
-        return canvas.toDataURL("image/jpeg", 0.90);
+        try {
+          return canvas.toDataURL("image/jpeg", 0.90);
+        } catch (taintErr) {
+          console.warn("Canvas export tainted by cross-origin video:", taintErr);
+          return null;
+        }
       }
     } catch (e) {
       console.warn("Video frame capture notice:", e);
     }
     return null;
+  }
+
+  // Record a multi-frame temporal video clip from playing video (without jarring seek interruptions)
+  async function captureReelVideoStream(vid, durationMs = 1800) {
+    if (!vid) return null;
+    return new Promise(async (resolve) => {
+      try {
+        const wasPaused = vid.paused;
+        const rect = getBoundingBox(vid);
+
+        // If paused, unmute-safe play
+        if (wasPaused) {
+          try {
+            vid.muted = true;
+            await vid.play();
+          } catch {}
+        }
+
+        // Capture instantaneous frame snapshot as immediate fallback
+        let fallbackFrameUrl = captureVideoFrame(vid);
+
+        const canvas = document.createElement("canvas");
+        const w = Math.min(vid.videoWidth || 640, 720);
+        const h = Math.round((w * (vid.videoHeight || 480)) / Math.max(vid.videoWidth || 640, 1));
+        canvas.width = Math.max(w, 240);
+        canvas.height = Math.max(h, 240);
+        const ctx = canvas.getContext("2d");
+
+        let stream = null;
+        let isCanvasStream = false;
+        try {
+          if (typeof vid.captureStream === "function") {
+            stream = vid.captureStream(24);
+          }
+        } catch (e) {
+          console.warn("Direct captureStream note:", e);
+        }
+
+        if (!stream || stream.getVideoTracks().length === 0) {
+          try {
+            stream = canvas.captureStream(24);
+            isCanvasStream = true;
+          } catch (e) {
+            console.warn("Canvas captureStream note:", e);
+          }
+        }
+
+        let animId = null;
+        if (isCanvasStream && ctx) {
+          const renderLoop = () => {
+            if (vid && vid.readyState >= 2) {
+              try {
+                ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+              } catch (drawErr) {}
+            }
+            animId = requestAnimationFrame(renderLoop);
+          };
+          renderLoop();
+        }
+
+        if (!stream) {
+          if (animId) cancelAnimationFrame(animId);
+          resolve({ frameDataUrl: fallbackFrameUrl, rect });
+          return;
+        }
+
+        let mimeType = "video/webm";
+        if (typeof MediaRecorder !== "undefined") {
+          if (MediaRecorder.isTypeSupported("video/webm;codecs=vp8")) {
+            mimeType = "video/webm;codecs=vp8";
+          } else if (MediaRecorder.isTypeSupported("video/webm")) {
+            mimeType = "video/webm";
+          }
+        }
+
+        let recorder = null;
+        try {
+          recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+        } catch (recInitErr) {
+          console.warn("MediaRecorder init failed (cross-origin stream protection):", recInitErr);
+          if (animId) cancelAnimationFrame(animId);
+          resolve({ frameDataUrl: fallbackFrameUrl, rect });
+          return;
+        }
+
+        const chunks = [];
+        recorder.ondataavailable = (e) => {
+          if (e.data && e.data.size > 0) chunks.push(e.data);
+        };
+
+        const cleanup = () => {
+          if (animId) cancelAnimationFrame(animId);
+          if (wasPaused) {
+            try { vid.pause(); } catch {}
+          }
+        };
+
+        recorder.onstop = () => {
+          cleanup();
+          try {
+            const blob = new Blob(chunks, { type: mimeType });
+            if (blob.size > 1000) {
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                resolve({
+                  videoDataUrl: reader.result,
+                  mimeType: mimeType,
+                  sizeBytes: blob.size,
+                  rect
+                });
+              };
+              reader.onerror = () => resolve({ frameSequence: (sampledFrames.length >= 2 ? sampledFrames : null), frameDataUrl: fallbackFrameUrl, rect });
+              reader.readAsDataURL(blob);
+            } else {
+              resolve({ frameSequence: (sampledFrames.length >= 2 ? sampledFrames : null), frameDataUrl: fallbackFrameUrl, rect });
+            }
+          } catch (err) {
+            console.warn("Blob conversion error:", err);
+            resolve({ frameSequence: (sampledFrames.length >= 2 ? sampledFrames : null), frameDataUrl: fallbackFrameUrl, rect });
+          }
+        };
+
+        recorder.onerror = (e) => {
+          console.warn("MediaRecorder error:", e);
+          cleanup();
+          resolve({ frameSequence: (sampledFrames.length >= 2 ? sampledFrames : null), frameDataUrl: fallbackFrameUrl, rect });
+        };
+
+        recorder.start(100);
+
+        // Periodically capture in-page video frame snapshots while playing
+        const sampledFrames = [];
+        if (fallbackFrameUrl) sampledFrames.push(fallbackFrameUrl);
+        const sampleInterval = setInterval(() => {
+          const f = captureVideoFrame(vid);
+          if (f && sampledFrames.length < 8) sampledFrames.push(f);
+        }, 150);
+
+        setTimeout(() => {
+          clearInterval(sampleInterval);
+          if (recorder && recorder.state === "recording") {
+            try {
+              recorder.requestData();
+              recorder.stop();
+            } catch {
+              cleanup();
+              resolve({ frameSequence: (sampledFrames.length >= 2 ? sampledFrames : null), frameDataUrl: fallbackFrameUrl, rect });
+            }
+          } else {
+            cleanup();
+            resolve({ frameSequence: (sampledFrames.length >= 2 ? sampledFrames : null), frameDataUrl: fallbackFrameUrl, rect });
+          }
+        }, durationMs);
+
+      } catch (err) {
+        console.warn("captureReelVideoStream failure:", err);
+        resolve(null);
+      }
+    });
   }
 
   function extractDataUrl(el) {
@@ -192,11 +489,12 @@
       const target = el.tagName === "IMG" ? el : el.querySelector("img");
       if (target && target.naturalWidth > 0 && target.naturalHeight > 0) {
         const canvas = document.createElement("canvas");
-        canvas.width = Math.min(target.naturalWidth, 1400);
-        canvas.height = Math.round((canvas.width * target.naturalHeight) / target.naturalWidth);
+        canvas.width = target.naturalWidth;
+        canvas.height = target.naturalHeight;
         const ctx = canvas.getContext("2d");
         ctx.drawImage(target, 0, 0, canvas.width, canvas.height);
-        return canvas.toDataURL("image/jpeg", 0.92);
+        // Lossless PNG export ensures zero JPEG compression artifacts on repeated scans
+        return canvas.toDataURL("image/png");
       }
     } catch (e) {
       console.warn("In-page canvas export restricted by host CORS policy:", e);
@@ -231,7 +529,7 @@
 
   // --- UI RENDERERS ---
 
-  function showLoadingToast() {
+  function showLoadingToast(statusMsg) {
     removeExistingModal();
     const toast = document.createElement("div");
     toast.id = "secura-floating-modal";
@@ -250,9 +548,9 @@
       </div>
       <div class="secura-loading-toast">
         <div class="secura-spinner-ring"></div>
-        <div class="secura-loading-title">Extracting Multi-Layer Neural Evidence</div>
+        <div class="secura-loading-title">${escapeHtml(statusMsg || 'Extracting Multi-Layer Neural Evidence')}</div>
         <div class="secura-loading-detail">
-          Analyzing spatial frequency artifacts, Swin Transformer feature maps, CLIP zero-shot semantics, and cryptographic container manifests...
+          Analyzing spatial frequency artifacts, Swin Transformer feature maps, temporal motion dynamics, and cryptographic container manifests...
         </div>
       </div>
     `;
@@ -267,17 +565,24 @@
   function renderForensicCard(data, srcUrl) {
     removeExistingModal();
 
-    const cv = data.canonical_verdict || {};
-    const isAi = cv.predicted_label != null ? (cv.predicted_label === "AI_GENERATED") : ((cv.model_score ?? 0) >= 0.50);
+    const cv = data?.canonical_verdict || {};
+    const isVideo = !!(data?.sampled_frames || data?.video_metadata || data?.video_ai_verdict || (cv.display_label && cv.display_label.includes("VIDEO")) || (srcUrl && srcUrl.includes("video_frame")));
+    const predLabel = cv.predicted_label || ((cv.model_score ?? 0.5) >= 0.5 ? "AI_GENERATED" : "NOT_AI_GENERATED");
+    const isAi = predLabel === "AI_GENERATED";
+    const isCamera = predLabel === "CAMERA_CAPTURED";
+    const isInconclusive = predLabel === "INCONCLUSIVE";
     const score = cv.model_score !== undefined ? cv.model_score : 0.50;
     const aiPct = Math.round(score * 100);
     const confPct = Math.round((isAi ? score : (1.0 - score)) * 100);
 
-    // Track strike count
-    if (isAi) {
-      consecutiveStrikes = Math.min(3, consecutiveStrikes + 1);
-    } else {
-      consecutiveStrikes = Math.max(0, consecutiveStrikes - 1);
+    // Track strike count (deduplicate re-inspections of the same media asset)
+    if (!srcUrl || lastInspectedMediaUrl !== srcUrl) {
+      lastInspectedMediaUrl = srcUrl;
+      if (isAi) {
+        consecutiveStrikes = Math.min(3, consecutiveStrikes + 1);
+      } else {
+        consecutiveStrikes = Math.max(0, consecutiveStrikes - 1);
+      }
     }
 
     const card = document.createElement("div");
@@ -290,11 +595,26 @@
     const dashOffset = circumference - (confPct / 100) * circumference;
     const gaugeColor = isAi ? "#ef4444" : "#10b981";
 
-    // Thumbnail preview element
-    const hasThumb = srcUrl && isValidMediaUrl(srcUrl) && !srcUrl.startsWith("data:video");
-    const thumbHtml = hasThumb
+    // Labels tailored for video/reel vs image
+    const pillClass = isAi ? "secura-pill-threat" : "secura-pill-safe";
+    const pillText = isVideo
+      ? (isAi ? "Threat: AI Synthetic Video" : isCamera ? "Verified: Camera Video" : isInconclusive ? "Inconclusive Video Evidence" : "Authentic Video: No AI Detected")
+      : (isAi ? "Threat: AI Synthetic" : isCamera ? "Verified: Camera Capture" : isInconclusive ? "Inconclusive Evidence" : "Authentic Image: Real / Not AI");
+    const headingText = isVideo
+      ? (isAi ? "SYNTHETIC AI VIDEO DETECTED" : isCamera ? "CAMERA ORIGINAL VIDEO" : isInconclusive ? "INCONCLUSIVE VIDEO VERDICT" : "AUTHENTIC REAL VIDEO")
+      : (isAi ? "SYNTHETIC MEDIA DETECTED" : isCamera ? "CAMERA ORIGINAL VERIFIED" : isInconclusive ? "INCONCLUSIVE VERDICT" : "AUTHENTIC REAL IMAGE");
+
+
+    // Thumbnail preview element (support first sampled frame thumbnail for video)
+    let thumbSrc = null;
+    if (data.sampled_frames && data.sampled_frames.length > 0 && data.sampled_frames[0].thumbnail_data_url) {
+      thumbSrc = data.sampled_frames[0].thumbnail_data_url;
+    } else if (srcUrl && isValidMediaUrl(srcUrl) && !srcUrl.startsWith("data:video")) {
+      thumbSrc = srcUrl;
+    }
+    const thumbHtml = thumbSrc
       ? `<div style="width: 44px; height: 44px; border-radius: 8px; overflow: hidden; border: 1px solid rgba(255,255,255,0.15); flex-shrink: 0; background: #000;">
-           <img src="${escapeHtml(srcUrl)}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.parentElement.style.display='none'">
+           <img src="${escapeHtml(thumbSrc)}" style="width: 100%; height: 100%; object-fit: cover;" onerror="this.parentElement.style.display='none'">
          </div>`
       : "";
 
@@ -305,7 +625,7 @@
           <div class="secura-shield-icon">S</div>
           <div class="secura-title-block">
             <span class="secura-title">Secura AI <span class="secura-badge-v2">v2.0</span></span>
-            <span class="secura-subtitle">Deepfake &amp; Provenance Defense</span>
+            <span class="secura-subtitle">${isVideo ? 'Temporal & Spatial Video Defense' : 'Deepfake &amp; Provenance Defense'}</span>
           </div>
         </div>
         <div class="secura-controls">
@@ -330,12 +650,12 @@
       <!-- Hero Verdict Section -->
       <div class="secura-hero-container">
         <div class="secura-hero-info">
-          <div class="secura-threat-pill ${isAi ? 'secura-pill-threat' : 'secura-pill-safe'}">
+          <div class="secura-threat-pill ${pillClass}">
             <span>●</span>
-            <span>${isAi ? 'Threat Detected: AI Synthetic' : 'Authentic: Camera Capture'}</span>
+            <span>${pillText}</span>
           </div>
           <div class="secura-verdict-heading">
-            ${isAi ? 'SYNTHETIC MEDIA DETECTED' : 'CAMERA ORIGINAL VERIFIED'}
+            ${headingText}
           </div>
           <div class="secura-verdict-summary">
             ${escapeHtml(cv.evidence_summary || 'Multi-model spatial & transformer analysis completed.')}
@@ -359,6 +679,40 @@
           </div>
         </div>
       </div>
+
+      ${data.brahma_permission ? `
+      <!-- BRAHMA Pre-Publication Policy Intelligence Section -->
+      <div class="secura-brahma-card" style="margin: 10px 14px; padding: 10px 12px; background: rgba(250, 247, 240, 0.95); border: 1px solid #E8E1D7; border-radius: 12px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+          <span style="font-size: 11px; font-weight: 800; color: #242321; display: flex; align-items: center; gap: 5px;">
+            🛡️ BRAHMA Pre-Publication Policy
+          </span>
+          <span style="font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 9999px; ${
+            data.brahma_permission.decision === 'ALLOWED'
+              ? 'background: #ECFDF5; color: #047857; border: 1px solid #A7F3D0;'
+              : data.brahma_permission.decision === 'NOT_ALLOWED'
+              ? 'background: #FEF2F2; color: #B91C1C; border: 1px solid #FECACA;'
+              : 'background: #FFFBEB; color: #B45309; border: 1px solid #FDE68A;'
+          }">
+            ${data.brahma_permission.decision}
+          </span>
+        </div>
+        <div style="font-size: 11px; color: #4D453C; line-height: 1.4; margin-bottom: 6px;">
+          ${escapeHtml(data.brahma_permission.explanation || 'Content assessed against official platform guidelines & statutory law.')}
+        </div>
+        ${data.brahma_permission.required_disclosures && data.brahma_permission.required_disclosures.length > 0 ? `
+        <div style="font-size: 10.5px; color: #92400E; background: #FEF3C7; padding: 5px 8px; border-radius: 6px; margin-bottom: 6px; font-weight: 600;">
+          ⚠️ Required: ${escapeHtml(data.brahma_permission.required_disclosures.join(', '))}
+        </div>
+        ` : ''}
+        ${data.brahma_permission.citations && data.brahma_permission.citations.length > 0 ? `
+        <div style="font-size: 10px; color: #77736D; border-top: 1px solid #E8E1D7; padding-top: 5px; display: flex; align-items: center; justify-content: space-between;">
+          <span style="font-family: monospace;">Clause: ${escapeHtml(data.brahma_permission.citations[0].clause_id)}</span>
+          <a href="${data.brahma_permission.citations[0].official_url}" target="_blank" style="color: #E98535; text-decoration: none; font-weight: 700;">Official Source ↗</a>
+        </div>
+        ` : ''}
+      </div>
+      ` : ''}
 
       <!-- Detailed Diagnostic Metrics -->
       <div class="secura-body-content">
@@ -385,25 +739,22 @@
             </div>
           </div>
         ` : `
-          <!-- Swin Transformer Artifacts -->
+          <!-- Model Architecture Prediction -->
           <div class="secura-signal-row">
             <div class="secura-signal-meta">
-              <span class="secura-signal-name">Swin Transformer Facial Residuals:</span>
-              <span class="secura-signal-score">${aiPct}% Synthetic</span>
+              <span class="secura-signal-name">${escapeHtml(cv.model_name || data.ai_detection_model || 'Secura Image Detector')}:</span>
+              <span class="secura-signal-score">${isAi ? `${aiPct}% Synthetic` : `${confPct}% Authentic Realism`}</span>
             </div>
             <div class="secura-bar-track">
               <div class="secura-bar-fill" style="width: ${aiPct}%; background: ${isAi ? '#ef4444' : '#10b981'};"></div>
             </div>
           </div>
 
-          <!-- CLIP Semantic Coherence -->
+          <!-- Score Semantics & Decision Baseline -->
           <div class="secura-signal-row">
             <div class="secura-signal-meta">
-              <span class="secura-signal-name">CLIP Semantic Zero-Shot Alignment:</span>
-              <span class="secura-signal-score">${(100 - aiPct)}% Coherence</span>
-            </div>
-            <div class="secura-bar-track">
-              <div class="secura-bar-fill" style="width: ${100 - aiPct}%; background: #06b6d4;"></div>
+              <span class="secura-signal-name">Forensic Score Semantics:</span>
+              <span class="secura-signal-score">${escapeHtml(cv.score_semantics || 'Calibrated probability from representation probe')}</span>
             </div>
           </div>
         `}
@@ -424,17 +775,46 @@
           </div>
         </div>
 
-        <!-- Biometric Pulse Wave Monitor preview -->
-        <div class="secura-wave-box">
-          <div class="secura-wave-left">
-            <span class="secura-pulse-icon">♥</span>
-            <div class="secura-pulse-reading">
-              <span class="secura-pulse-bpm">${isAi ? '0.0' : '72.4'} BPM</span>
-              <span class="secura-pulse-desc">rPPG Vascular Perfusion</span>
+        ${data.sampled_frames && data.sampled_frames.length > 0 ? `
+          <!-- Fixed Keyframes Forensic Scrubber Strip -->
+          <div class="secura-keyframes-strip-container">
+            <div class="secura-keyframes-header">
+              <div class="secura-keyframes-title-wrap">
+                <span class="secura-keyframes-icon">🎞️</span>
+                <span class="secura-keyframes-title">Fixed Sampled Frames (${data.sampled_frames.length})</span>
+              </div>
+              <span class="secura-keyframes-badge">${isAi ? 'Anomalies Flagged' : 'Coherent Strata'}</span>
+            </div>
+            <div class="secura-keyframes-scroll">
+              ${data.sampled_frames.map((f) => {
+                const isAnomaly = isAi && (data.anomaly_timestamps?.some(t => Math.abs(t - f.timestamp_sec) < 0.35) || data.suspicious_intervals?.some(inv => f.timestamp_sec >= inv.start_time && f.timestamp_sec <= inv.end_time) || (cv.model_score >= 0.70));
+                return `
+                  <div class="secura-keyframe-item ${isAnomaly ? 'item-anomaly' : 'item-safe'}" title="Fixed Frame #${f.frame_index} @ ${f.timestamp_sec.toFixed(2)}s">
+                    <div class="secura-keyframe-thumb">
+                      ${f.thumbnail_data_url ? `<img src="${f.thumbnail_data_url}" alt="Frame #${f.frame_index}">` : `<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:9px;color:#94a3b8;">#${f.frame_index}</div>`}
+                      <span class="secura-keyframe-time">${f.timestamp_sec.toFixed(1)}s</span>
+                    </div>
+                    <div class="secura-keyframe-pill ${isAnomaly ? 'pill-anomaly' : 'pill-safe'}">
+                      ${isAnomaly ? 'ANOMALY' : 'CLEAN'}
+                    </div>
+                  </div>
+                `;
+              }).join('')}
             </div>
           </div>
-          <div style="font-size: 10px; color: ${isAi ? '#f87171' : '#34d399'}; font-weight: 700; text-align: right;">
-            ${isAi ? 'FLATLINE DETECTED' : 'RHYTHMIC CARDIAC PULSE'}
+        ` : ''}
+
+        <!-- Signal Analysis & Chromatic Consistency preview -->
+        <div class="secura-wave-box">
+          <div class="secura-wave-left">
+            <span class="secura-pulse-icon">📊</span>
+            <div class="secura-pulse-reading">
+              <span class="secura-pulse-bpm" style="font-size: 11px;">${isAi ? 'ELEVATED ANOMALIES' : (isCamera ? 'ORGANIC PROFILE' : 'UNVERIFIED PROFILE')}</span>
+              <span class="secura-pulse-desc">Spectral & Chromatic Consistency</span>
+            </div>
+          </div>
+          <div style="font-size: 10px; color: ${isAi ? '#f87171' : (isCamera ? '#34d399' : '#94a3b8')}; font-weight: 700; text-align: right;">
+            ${isAi ? 'DIFFUSION ARTIFACTS' : (isCamera ? 'SENSOR RESIDUAL MATCH' : 'NO ANOMALIES FOUND')}
           </div>
         </div>
       </div>
@@ -499,7 +879,7 @@
 
   function copyEvidenceToClipboard(data, srcUrl, btnEl) {
     const cv = data?.canonical_verdict || {};
-    const isAi = cv.predicted_label != null ? (cv.predicted_label === "AI_GENERATED") : ((cv.model_score ?? 0) >= 0.50);
+    const isAi = cv.predicted_label != null ? (cv.predicted_label === "AI_GENERATED") : ((cv.model_score ?? 0.5) >= 0.50);
     const rawScore = cv.model_score != null ? cv.model_score : 0.50;
     const confPct = Math.round((isAi ? rawScore : (1.0 - rawScore)) * 100);
     const reportText = `[SECURA AI FORENSIC EVIDENCE RECORD]
@@ -661,6 +1041,116 @@ Integrity Check: VALID`;
   let inPageFramesAnalyzed = 0;
   let inPageAlertsCount = 0;
   let inPageStartTime = null;
+  let inPagePromptOverlay = null;
+
+  function dismissInPagePrompt() {
+    if (inPagePromptOverlay) {
+      inPagePromptOverlay.remove();
+      inPagePromptOverlay = null;
+    }
+  }
+
+  function showInPageSentinelPrompt() {
+    if (inPagePromptOverlay) return;
+    if (inPageStream && inPageStream.active) {
+      if (inPageSentinelBarEl) {
+        inPageSentinelBarEl.scrollIntoView({ behavior: "smooth" });
+      }
+      return;
+    }
+
+    inPagePromptOverlay = document.createElement("div");
+    inPagePromptOverlay.id = "secura-inpage-sentinel-prompt";
+    inPagePromptOverlay.style.cssText = `
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 2147483647;
+      background: rgba(36, 35, 33, 0.96);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      color: #FAF7F0;
+      padding: 12px 20px;
+      border-radius: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+      border: 1.5px solid #10B981;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    `;
+
+    inPagePromptOverlay.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 22px;">🛡️</span>
+        <div>
+          <div style="font-weight: 700; color: #FFFFFF; font-size: 13px; letter-spacing: -0.01em;">Secura AI — Live Stream Sentinel</div>
+          <div style="font-size: 11px; color: #D5CEC4;">Select screen or window to monitor in real time for AI deepfakes</div>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <button id="secura-inpage-grant-btn" style="
+          background: #10B981;
+          color: #FFFFFF;
+          border: none;
+          padding: 8px 16px;
+          border-radius: 8px;
+          font-weight: 700;
+          font-size: 12px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);
+        ">
+          ▶ Select Screen to Monitor
+        </button>
+        <button id="secura-inpage-window-btn" style="
+          background: rgba(255, 255, 255, 0.12);
+          color: #FAF7F0;
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          padding: 8px 12px;
+          border-radius: 8px;
+          font-weight: 600;
+          font-size: 11.5px;
+          cursor: pointer;
+        " title="Open dedicated monitor window">
+          ⛶ Dedicated Monitor
+        </button>
+        <button id="secura-inpage-dismiss-btn" style="
+          background: transparent;
+          border: none;
+          color: #A09C96;
+          padding: 6px;
+          cursor: pointer;
+          font-size: 14px;
+          line-height: 1;
+        " title="Dismiss">✕</button>
+      </div>
+    `;
+
+    (document.body || document.documentElement).appendChild(inPagePromptOverlay);
+
+    // Direct in-page click gives genuine user activation for getDisplayMedia()
+    document.getElementById("secura-inpage-grant-btn")?.addEventListener("click", async () => {
+      dismissInPagePrompt();
+      await startInPageSentinelCapture();
+    });
+
+    document.getElementById("secura-inpage-window-btn")?.addEventListener("click", () => {
+      dismissInPagePrompt();
+      chrome.runtime.sendMessage({ type: "SECURA_OPEN_SENTINEL_WINDOW" });
+    });
+
+    document.getElementById("secura-inpage-dismiss-btn")?.addEventListener("click", () => {
+      dismissInPagePrompt();
+      chrome.storage.local.set({
+        secura_screening_session: { active: false, status: "READY" }
+      });
+    });
+  }
 
   async function startInPageSentinel() {
     if (inPageStream && inPageStream.active) {
@@ -669,7 +1159,10 @@ Integrity Check: VALID`;
       }
       return;
     }
+    showInPageSentinelPrompt();
+  }
 
+  async function startInPageSentinelCapture() {
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: { cursor: "always" },
@@ -745,7 +1238,6 @@ Integrity Check: VALID`;
     inPageSentinelBarEl.className = isThreat ? "bar-threat" : "";
 
     const riskPct = Math.round(riskScore * 100);
-    const bpm = isThreat ? "0.0" : (71 + Math.floor(Math.random() * 5));
 
     inPageSentinelBarEl.innerHTML = `
       <div class="secura-bar-badge ${isThreat ? 'badge-red' : 'badge-green'}" id="secura-sentinel-status-badge">
@@ -755,9 +1247,9 @@ Integrity Check: VALID`;
       <div class="secura-bar-metrics">
         <span id="secura-bar-risk-val">Risk: <strong>${riskPct}%</strong></span>
         <span style="opacity: 0.35">|</span>
-        <span id="secura-bar-bpm-val">♥ ${bpm} BPM</span>
+        <span id="secura-bar-bpm-val">${isThreat ? '⚠️ Texture Anomaly' : '✓ Frame Stream Synchronized'}</span>
         <span style="opacity: 0.35">|</span>
-        <span id="secura-bar-status-val">${isThreat ? '⚠️ Trajectory Anomaly' : '✓ Normal Optical Flow'}</span>
+        <span id="secura-bar-status-val">${isThreat ? 'Neural Synthesis Artifacts' : 'No Synthesis Detected'}</span>
       </div>
       <button class="secura-bar-btn btn-simulate" id="secura-bar-sim-btn" title="Simulate an immediate AI Threat warning on this screen">
         ⚡ Simulate Threat
@@ -1072,7 +1564,7 @@ Integrity Check: VALID`;
     `;
     inspectModeOverlay.innerHTML = `
       <span style="color:#E98535; font-size:16px;">✦</span>
-      <span>Secura AI Image Inspector: Click any image on this page to analyze</span>
+      <span>Secura AI Inspector: Click any image or video Reel to analyze</span>
       <button id="secura-cancel-inspect-btn" style="
         background: rgba(255,255,255,0.15);
         border: none;
@@ -1096,26 +1588,22 @@ Integrity Check: VALID`;
       e.preventDefault();
       e.stopPropagation();
 
-      const target = e.target;
-      let mediaUrl = null;
-
-      if (target.tagName === "IMG") {
-        mediaUrl = target.currentSrc || target.src;
-      } else if (target.tagName === "VIDEO") {
-        mediaUrl = target.currentSrc || target.src;
-      } else {
-        const imgChild = target.querySelector("img");
-        if (imgChild) mediaUrl = imgChild.currentSrc || imgChild.src;
-      }
+      lastContextMenuPos = { x: e.clientX, y: e.clientY };
+      lastRightClickedElement = e.target;
 
       deactivateInspectMode();
 
-      if (mediaUrl) {
+      showLoadingToast("Secura AI: Initializing media inspection...");
+
+      const mediaInfo = findBestMediaTarget();
+      if (mediaInfo) {
         chrome.runtime.sendMessage({
-          type: "SECURA_INSPECT_MEDIA_URL",
-          url: mediaUrl,
+          type: "SECURA_INSPECT_MEDIA_TARGET",
+          mediaInfo: mediaInfo,
           pageUrl: window.location.href
         });
+      } else {
+        showErrorToast("No image or video Reel detected under click position.");
       }
     };
 
@@ -1129,3 +1617,4 @@ Integrity Check: VALID`;
     }
   }
 })();
+

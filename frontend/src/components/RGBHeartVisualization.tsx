@@ -45,11 +45,9 @@ export const RGBHeartVisualization: React.FC<RGBHeartProps> = ({
   const [showB, setShowB] = useState(true);
 
   // Derive pulse & classification state
-  const rawBpm = activeSample?.heart_rate_bpm ?? summary?.estimated_heart_rate_bpm ?? (isAiGenerated ? 0.0 : 72.0);
+  const rawBpm = activeSample?.heart_rate_bpm ?? summary?.estimated_heart_rate_bpm ?? 0.0;
   const isSynthetic = isAiGenerated ?? (activeSample?.ai_probability != null ? activeSample.ai_probability > 0.5 : false);
   const hasCardiacPulse = !isSynthetic && rawBpm >= 45.0 && rawBpm <= 160.0;
-  const displayBpm = hasCardiacPulse ? rawBpm.toFixed(1) : "0.0";
-  const confidencePercent = confidenceScore != null ? (confidenceScore * 100).toFixed(1) : null;
 
   // Normalized channel levels
   const rVal = activeSample ? (activeSample.r_mean > 1.0 ? activeSample.r_mean / 255.0 : activeSample.r_mean) : 0.62;
@@ -458,21 +456,19 @@ export const RGBHeartVisualization: React.FC<RGBHeartProps> = ({
             </div>
             <p className="text-[10px] text-[#7A7165]">
               {isSynthetic
-                ? "Volumetric chromatic disruption • Aperiodic neural flatline"
-                : hasCardiacPulse || isAiGenerated === false
-                ? "Luminescent optical perfusion • 72 BPM authentic rhythm"
-                : "Continuous holographic spatial projection"}
+                ? "Volumetric chromatic disruption • High-frequency dispersion"
+                : "Harmonic RGB color-space geometry • Simulated representation"}
             </p>
           </div>
         </div>
 
-        {/* BPM and Status */}
+        {/* Telemetry and Status */}
         <div className="text-right">
           <div className="font-mono font-extrabold text-xs text-[#2A2521]">
-            {isSynthetic ? "0.0 BPM" : hasCardiacPulse || isAiGenerated === false ? `${displayBpm} BPM` : "ACTIVE"}
+            {rawBpm > 0 ? `${rawBpm.toFixed(1)} rPPG (Est)` : "GEOMETRIC TELEMETRY"}
           </div>
           <span className="text-[10px] text-[#8A7E70]">
-            {confidencePercent ? `${confidencePercent}% Conf` : isSynthetic ? "AI Disrupted" : "rPPG Pulse"}
+            {confidenceScore != null ? `Confidence: ${(confidenceScore * 100).toFixed(0)}%` : "Simulated Demonstration"}
           </span>
         </div>
       </div>
@@ -490,25 +486,25 @@ export const RGBHeartVisualization: React.FC<RGBHeartProps> = ({
 
         {/* Holographic Watermark HUD */}
         <div className="absolute top-2.5 left-2.5 text-[9px] font-mono tracking-widest text-[#00F2FE]/70 uppercase select-none pointer-events-none bg-black/50 backdrop-blur-xs px-2 py-0.5 rounded border border-[#00F2FE]/20">
-          3D OPTICAL HOLOGRAM &bull; {isSynthetic ? "HIGH JITTER" : "SYNCHRONIZED"}
+          3D CHROMATIC MANIFOLD &bull; {isSynthetic ? "DISPERSED" : "HARMONIC"}
         </div>
 
         {/* Bottom Coordinates Readout */}
         <div className="absolute bottom-2.5 right-2.5 text-[8px] font-mono text-white/50 select-none pointer-events-none">
-          FOV: 340mm &bull; {hasCardiacPulse ? "HEMODYNAMICS: NOMINAL" : "APERIODIC: SYNTHETIC"}
+          FOV: 340mm &bull; GEOMETRIC DEMONSTRATION &bull; NON-BIOMETRIC
         </div>
       </div>
 
-      {/* rPPG Waveform Sparkline */}
+      {/* Chromatic Waveform Sparkline */}
       <div className="w-full mt-3 space-y-1">
         <div className="flex justify-between items-center text-[10px] font-semibold text-[#7A7165]">
-          <span>HEMODYNAMIC VOLUMETRIC PULSE (GREEN CHANNEL)</span>
+          <span>CHROMATIC VARIANCE WAVEFORM (DEMONSTRATION)</span>
           <span
             className={`font-mono ${
               isSynthetic ? "text-[#FF2A55]" : "text-[#00A3FF]"
             }`}
           >
-            {isSynthetic ? "APERIODIC (SYNTHETIC)" : "SYNCHRONIZED (AUTHENTIC)"}
+            {isSynthetic ? "DISPERSED" : "CHROMATIC OSCILLATION"}
           </span>
         </div>
         <canvas

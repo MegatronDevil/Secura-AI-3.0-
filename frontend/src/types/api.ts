@@ -1,6 +1,32 @@
 
-export type CanonicalBinaryLabel = "AI_GENERATED" | "NOT_AI_GENERATED";
-export type CanonicalDisplayLabel = "AI GENERATED" | "NOT AI GENERATED";
+export type CanonicalBinaryLabel = "AI_GENERATED" | "NOT_AI_GENERATED" | "CAMERA_CAPTURED" | "INCONCLUSIVE";
+export type CanonicalDisplayLabel = "AI GENERATED" | "NOT AI GENERATED" | "CAMERA CAPTURED" | "INCONCLUSIVE";
+
+export type ProvenanceVerificationStatus =
+  | "VERIFIED"
+  | "SUPPORTED_BY_PARTIAL_EVIDENCE"
+  | "INFERRED"
+  | "CONFLICTING"
+  | "UNKNOWN";
+
+export interface ProvenanceRecord {
+  analysis_id: string;
+  input_sha256: string;
+  file_name: string;
+  file_size_bytes: number;
+  detected_mime: string;
+  analysis_timestamp_utc: string;
+  original_capture_location: string;
+  capture_device: string;
+  original_creator: string;
+  acquisition_source: string;
+  transfer_history: string[];
+  current_file_location: string;
+  verification_status: ProvenanceVerificationStatus;
+  c2pa_status: string;
+  c2pa_signer?: string | null;
+  provenance_notes: string[];
+}
 
 export interface CanonicalBinaryVerdict {
   predicted_label: CanonicalBinaryLabel;
@@ -109,16 +135,24 @@ export interface ExplainabilityHeatmapResponse {
 }
 
 export interface LiveShieldFrameResponse {
-  timestamp: number;
-  fps_estimate: number;
+  timestamp?: number;
+  timestamp_ms?: number;
+  frame_seq?: number;
+  server_processed_at_ms?: number;
+  fps_estimate?: number;
   face_detected: boolean;
   face_box: [number, number, number, number] | null;
   synthetic_confidence: number;
-  rppg_pulse_estimate: number | null;
+  liveness_confidence?: number;
+  rppg_pulse_estimate?: number | null;
+  rppg_signal_variance?: number;
   blood_volume_variance: number;
   temporal_consistency: number;
-  verdict: "LIVE_AUTHENTIC_STREAM" | "DEEPFAKE_INJECTION_DETECTED" | "NO_FACE_IN_FRAME" | "INSUFFICIENT_LIGHTING";
+  trigger_region?: string;
+  latency_ms?: number;
+  verdict: "LIVE_AUTHENTIC_STREAM" | "DEEPFAKE_INJECTION_DETECTED" | "NO_FACE_IN_FRAME" | "INSUFFICIENT_LIGHTING" | string;
   suspicion_flags: string[];
+  warnings?: string[];
 }
 
 export interface DCTForensicResult {
@@ -419,6 +453,7 @@ export interface Milestone1Response {
   corneal_reflections?: CornealReflectionsResult | null;
   perceptual_hashes?: PerceptualHashResult | null;
   canonical_verdict?: CanonicalBinaryVerdict;
+  provenance_record?: ProvenanceRecord;
   component_errors: ComponentError[];
   disclaimer: string;
 }
@@ -552,6 +587,7 @@ export interface VideoForensicResult {
   fusion_verdict?: VideoFusionResult | null;
   runtime_breakdown_ms?: Record<string, number>;
   canonical_verdict?: CanonicalBinaryVerdict | null;
+  provenance_record?: ProvenanceRecord | null;
 }
 
 

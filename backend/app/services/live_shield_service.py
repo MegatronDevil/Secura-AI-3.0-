@@ -25,7 +25,8 @@ class LiveShieldService:
     def evaluate_stream_frame(
         self,
         image: Image.Image,
-        timestamp_ms: Optional[float] = None
+        timestamp_ms: Optional[float] = None,
+        frame_seq: Optional[int] = None
     ) -> Dict[str, Any]:
         t0 = time.time()
         w, h = image.size
@@ -67,13 +68,11 @@ class LiveShieldService:
         if len(self.frame_history) > self.max_history:
             self.frame_history.pop(0)
 
-        # 3. Calculate Biometric Pulse & Variance
+        # 3. Calculate Chromatic Channel Variance (Geometric signal tracking)
         rppg_variance = 0.0
-        pulse_bpm = 72.0
         if len(self.frame_history) >= 5:
             signals = np.array([x[1] for x in self.frame_history])
             rppg_variance = float(np.var(signals))
-            pulse_bpm = float(np.clip(68.0 + (signals[-1] % 15.0), 58.0, 95.0))
 
         # 4. Determine if image is predominantly document/UI (text, fonts, browser, IDE)
         # Real photos/videos have rich continuous color distributions, whereas font/text UI has
@@ -184,7 +183,7 @@ class LiveShieldService:
         trigger_tag = "none"
 
         for tag, crop_img in crops_to_check:
-            res_c = detector.detect(crop_img)
+            res_c = detector.detect(crop_img, is_video_frame=True)
             if res_c and res_c.available:
                 c_score = float(res_c.uncalibrated_margin)
                 if c_score > max_score:
@@ -207,24 +206,32 @@ class LiveShieldService:
         is_spoof = False
         warnings = []
 
+        has_pulse = (rppg_variance >= 0.20 and len(self.frame_history) >= 5)
+
         if has_face:
             # Sensitive live stream detection for generative faces, morphing, and synthetic skin
-            if eval_score >= 0.50:
+            # If natural rPPG capillary pulse is actively detected, require >= 0.70 confidence to avoid webcam noise false positives
+            face_threshold = 0.70 if has_pulse else 0.50
+            if eval_score >= face_threshold:
                 is_spoof = True
                 warnings.append("Neural classifier detected generative facial artifacts or synthetic skin textures.")
-            elif len(self.frame_history) >= 15 and rppg_variance < 0.0001 and eval_score >= 0.45:
-                is_spoof = True
-                warnings.append("Physiological rPPG pulse flatline detected with elevated synthetic indicators.")
         else:
             # Screen share / object / phone presentation mode
             # If an actual AI image or media crop was detected on screen or presented to camera
             if eval_score >= 0.50 and trigger_tag != "none":
                 is_spoof = True
-                warnings.append("Synthetic generative media texture detected on active visual stream.")
+                warnings.append(f"Synthetic generative media texture detected on active visual stream ({trigger_tag} region).")
 
-        liveness_confidence = round(1.0 - eval_score if not is_spoof else eval_score, 4)
+        # Provisional BRAHMA Policy Check for Live Shield
+        brahma_provisional = {
+            "decision": "REVIEW_REQUIRED" if is_spoof else "ALLOWED",
+            "policy_scope": "PLATFORM_RULES & STATUTORY",
+            "provisional": True,
+            "note": "Provisional real-time stream check. Frame-level signal does not constitute a final pre-publication verdict."
+        }
+
+        liveness_confidence = round(max(0.0, min(1.0, 1.0 - eval_score)), 4)
         latency_ms = round((time.time() - t0) * 1000, 2)
-        estimated_bpm = round(pulse_bpm, 1) if not is_spoof else 0.0
 
         return {
             "verdict": "DEEPFAKE_INJECTION_DETECTED" if is_spoof else "LIVE_AUTHENTIC_STREAM",
@@ -232,16 +239,19 @@ class LiveShieldService:
             "neural_ai_score": round(eval_score, 4),
             "synthetic_confidence": round(eval_score, 4),
             "liveness_confidence": liveness_confidence,
-            "estimated_pulse_bpm": estimated_bpm,
-            "rppg_pulse_estimate": estimated_bpm,
-            "rppg_signal_variance": round(rppg_variance, 4),
-            "blood_volume_variance": round(rppg_variance, 4),
-            "temporal_consistency": round(1.0 - min(1.0, rppg_variance), 4),
+            "frame_seq": frame_seq,
+            "timestamp_ms": timestamp_ms or now_ms,
+            "server_processed_at_ms": round(time.time() * 1000, 2),
+            "trigger_region": trigger_tag,
+            "rppg_signal_variance": round(rppg_variance, 6),
+            "blood_volume_variance": round(rppg_variance, 6),
+            "temporal_consistency": round(1.0 - min(1.0, rppg_variance * 100.0), 4),
             "detected_face_box": face_box,
             "face_box": face_box,
             "face_detected": face_box is not None,
             "warnings": warnings,
             "suspicion_flags": warnings,
+            "brahma_provisional": brahma_provisional,
             "latency_ms": latency_ms,
             "history_window_frames": len(self.frame_history)
         }

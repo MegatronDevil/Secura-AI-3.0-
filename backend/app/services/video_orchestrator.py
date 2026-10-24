@@ -44,7 +44,7 @@ class VideoForensicsOrchestrator:
         self.branch_face = FaceConsistencyBranch()
         self.fusion_engine = VideoEvidenceFusion()
 
-    def analyze(self, video_bytes: bytes, filename: str = "video.mp4") -> VideoForensicResult:
+    def analyze(self, video_bytes: bytes, filename: str = "video.mp4", acquisition_url: Optional[str] = None) -> VideoForensicResult:
         request_id = str(uuid.uuid4())
         now_utc = datetime.now(timezone.utc)
         runtime_breakdown: Dict[str, float] = {}
@@ -112,14 +112,19 @@ class VideoForensicsOrchestrator:
         )
 
         b1_raw = b1_res.raw_metrics
+        heart_bpm = b1_raw.get("estimated_heart_rate_bpm")
+        pulse_hz = b1_raw.get("dominant_pulse_hz")
+        entropy = b1_raw.get("spectral_entropy")
         rgb_summary = RGBSummary(
             mean_red=b1_raw.get("mean_red", 0.5),
             mean_green=b1_raw.get("mean_green", 0.5),
             mean_blue=b1_raw.get("mean_blue", 0.5),
-            rg_correlation=b1_raw.get("rg_correlation", 0.0),
-            gb_correlation=b1_raw.get("gb_correlation", 0.0),
+            rg_correlation=b1_raw.get("rg_correlation", 0.85),
+            gb_correlation=b1_raw.get("gb_correlation", 0.85),
             temporal_jitter_index=b1_raw.get("temporal_jitter_index", 0.0),
-            dominant_pulse_hz=None,
+            dominant_pulse_hz=pulse_hz,
+            estimated_heart_rate_bpm=heart_bpm,
+            spectral_entropy=entropy,
         )
 
         # Construct sampled_frames with per-frame probabilities from Branch 4 and deltas from Branch 1
@@ -150,6 +155,8 @@ class VideoForensicsOrchestrator:
                     b_std=float(np.std(b_norm)),
                     delta_prev_frame=d_prev,
                     thumbnail_data_url=f.thumbnail_data_url,
+                    thumbnail_b64=f.thumbnail_b64 if hasattr(f, 'thumbnail_b64') else None,
+                    heart_rate_bpm=heart_bpm,
                     ai_probability=p_ai,
                     ai_class="AI_GENERATED" if (p_ai and p_ai > 0.5) else "LIKELY_REAL",
                     sensor_noise_variance=n_var,
@@ -218,6 +225,39 @@ class VideoForensicsOrchestrator:
             methodology_note="Result synthesized from multi-layer spatial diffusion and temporal representation curvature. AI detectors may make mistakes."
         )
 
+        # Build ISO/IEC 27037 Video Provenance Record
+        from app.services.metadata_inspector import build_provenance_record
+        video_ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else 'mp4'
+        prov_record = build_provenance_record(
+            raw_bytes=video_bytes,
+            declared_filename=filename,
+            mime_type=f"video/{video_ext}",
+            metadata_result=None,
+            c2pa_result=None,
+            analysis_id=request_id,
+            acquisition_url=acquisition_url,
+        )
+
+        # BRAHMA Policy Pre-Publication Permission Evaluation
+        brahma_perm = None
+        try:
+            from app.services.brahma import get_brahma_engine, BrahmaEvaluationRequest
+            b_engine = get_brahma_engine()
+            target_platform = "youtube" if (acquisition_url and "youtube" in acquisition_url.lower()) else ("instagram" if (acquisition_url and "instagram" in acquisition_url.lower()) else ("tiktok" if (acquisition_url and "tiktok" in acquisition_url.lower()) else "general"))
+            b_req = BrahmaEvaluationRequest(
+                platform=target_platform,
+                jurisdiction="IN",
+                media_type="video",
+                caption_or_text=filename or "",
+                canonical_ai_verdict=canonical_binary.predicted_label.replace("_", " "),
+                ai_confidence_score=canonical_binary.model_score,
+                c2pa_present=bool(prov_record and prov_record.c2pa_metadata),
+            )
+            b_res = b_engine.evaluate(b_req)
+            brahma_perm = b_res.model_dump()
+        except Exception as b_exc:
+            logger.warning("BRAHMA video evaluation notice: %s", b_exc)
+
         return VideoForensicResult(
             request_id=request_id,
             timestamp_utc=now_utc,
@@ -231,5 +271,7 @@ class VideoForensicsOrchestrator:
             suspicious_intervals=all_suspicious,
             fusion_verdict=fusion_verdict,
             canonical_verdict=canonical_binary,
+            brahma_permission=brahma_perm,
+            provenance_record=prov_record,
             runtime_breakdown_ms=runtime_breakdown,
         )

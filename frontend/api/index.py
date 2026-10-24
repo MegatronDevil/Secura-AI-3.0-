@@ -1189,7 +1189,7 @@ async def analyze_video(
                 "g_mean": round(g_val, 2),
                 "b_mean": round(b_val, 2),
                 "delta_e": delta_e,
-                "heart_rate_bpm": round(72.0 + pulse * 2, 1) if not is_ai_video else 0.0,
+                "heart_rate_bpm": None,
                 "thumbnail_b64": default_thumb_b64,
                 "thumbnail_data_url": default_thumb_b64,
             })
@@ -1203,7 +1203,7 @@ async def analyze_video(
     rgb_summary = {
         "mean_delta_e": 2.45 if not is_ai_video else 0.82,
         "peak_frequency_hz": 1.25 if not is_ai_video else 0.35,
-        "estimated_heart_rate_bpm": 74.5 if not is_ai_video else 0.0,
+        "estimated_heart_rate_bpm": None,
         "confidence_score": 0.92 if not is_ai_video else 0.95,
         "spectral_entropy": 0.65 if not is_ai_video else 0.22,
         "r_variance": 4.12 if not is_ai_video else 0.65,

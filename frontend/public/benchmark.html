@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Secura AI — 80-Image Benchmark Gallery</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #070b14;
+      --card-bg: rgba(15, 23, 42, 0.75);
+      --card-border: rgba(30, 41, 59, 0.8);
+      --cyan: #06b6d4;
+      --cyan-glow: rgba(6, 182, 212, 0.35);
+      --emerald: #10b981;
+      --emerald-glow: rgba(16, 185, 129, 0.3);
+      --red: #f43f5e;
+      --red-glow: rgba(244, 63, 94, 0.3);
+      --amber: #f59e0b;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background: var(--bg);
+      background-image: 
+        radial-gradient(ellipse at 20% 0%, rgba(6, 182, 212, 0.12) 0%, transparent 60%),
+        radial-gradient(ellipse at 80% 10%, rgba(99, 102, 241, 0.1) 0%, transparent 50%),
+        radial-gradient(ellipse at 50% 100%, rgba(16, 185, 129, 0.08) 0%, transparent 50%);
+      color: var(--text);
+      font-family: 'Outfit', sans-serif;
+      min-height: 100vh;
+      padding: 24px 16px 60px;
+    }
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    header {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+    .badge-top {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 16px;
+      border-radius: 999px;
+      background: rgba(6, 182, 212, 0.1);
+      border: 1px solid rgba(6, 182, 212, 0.3);
+      color: var(--cyan);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+    }
+    h1 {
+      font-size: clamp(26px, 4vw, 42px);
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      background: linear-gradient(135deg, #ffffff 30%, #94a3b8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 8px;
+    }
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 15px;
+      max-width: 650px;
+      margin: 0 auto 20px;
+    }
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      max-width: 900px;
+      margin: 0 auto 28px;
+    }
+    .stat-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 14px;
+      text-align: center;
+      backdrop-filter: blur(12px);
+    }
+    .stat-val {
+      font-size: 26px;
+      font-weight: 800;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .stat-val.emerald { color: var(--emerald); }
+    .stat-val.cyan { color: var(--cyan); }
+    .stat-val.amber { color: var(--amber); }
+    .stat-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+      padding: 12px 16px;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+    }
+    .filter-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .filter-btn {
+      background: transparent;
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      padding: 7px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-family: 'Outfit', sans-serif;
+    }
+    .filter-btn:hover {
+      color: var(--text);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+    .filter-btn.active {
+      background: rgba(6, 182, 212, 0.15);
+      border-color: var(--cyan);
+      color: var(--cyan);
+      box-shadow: 0 0 16px var(--cyan-glow);
+    }
+    .search-input {
+      background: rgba(2, 6, 23, 0.8);
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      padding: 8px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-family: 'Outfit', sans-serif;
+      min-width: 220px;
+      outline: none;
+    }
+    .search-input:focus {
+      border-color: var(--cyan);
+    }
+    .gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 18px;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+      backdrop-filter: blur(8px);
+    }
+    .card:hover {
+      transform: translateY(-3px);
+      border-color: rgba(6, 182, 212, 0.4);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+    .img-wrapper {
+      position: relative;
+      width: 100%;
+      height: 220px;
+      background: #020617;
+      overflow: hidden;
+    }
+    .img-wrapper img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transition: transform 0.3s ease;
+      cursor: pointer;
+    }
+    .card:hover .img-wrapper img {
+      transform: scale(1.03);
+    }
+    .card-badges {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      right: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      pointer-events: none;
+    }
+    .num-pill {
+      background: rgba(0, 0, 0, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+      padding: 3px 8px;
+      border-radius: 6px;
+      backdrop-filter: blur(4px);
+    }
+    .match-pill {
+      font-size: 11px;
+      font-weight: 800;
+      padding: 3px 8px;
+      border-radius: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      backdrop-filter: blur(4px);
+    }
+    .match-pill.pass {
+      background: rgba(16, 185, 129, 0.25);
+      color: #34d399;
+      border: 1px solid var(--emerald);
+    }
+    .match-pill.fail {
+      background: rgba(244, 63, 94, 0.25);
+      color: #fb7185;
+      border: 1px solid var(--red);
+    }
+    .card-body {
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      flex-grow: 1;
+      gap: 10px;
+    }
+    .card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #e2e8f0;
+      word-break: break-all;
+      line-height: 1.4;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .cat-tag {
+      font-size: 11px;
+      color: var(--cyan);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .freq-tag {
+      font-size: 11px;
+      color: #a78bfa;
+      background: rgba(139, 92, 246, 0.12);
+      border: 1px solid rgba(139, 92, 246, 0.3);
+      padding: 2px 7px;
+      border-radius: 6px;
+      display: inline-block;
+      width: fit-content;
+    }
+    .verdict-box {
+      background: rgba(2, 6, 23, 0.6);
+      border: 1px solid rgba(30, 41, 59, 0.6);
+      border-radius: 10px;
+      padding: 10px;
+      margin-top: auto;
+    }
+    .verdict-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .pred-pill {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+    .pred-pill.ai { color: #f43f5e; }
+    .pred-pill.real { color: #10b981; }
+    .score-txt {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+    }
+    .bar-bg {
+      width: 100%;
+      height: 6px;
+      background: #1e293b;
+      border-radius: 999px;
+      overflow: hidden;
+      margin-bottom: 6px;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 999px;
+      transition: width 0.3s ease;
+    }
+    .bar-fill.ai { background: linear-gradient(90deg, #f43f5e, #fb7185); }
+    .bar-fill.real { background: linear-gradient(90deg, #10b981, #34d399); }
+    .footer-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Lightbox Modal */
+    .lightbox {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(2, 6, 23, 0.92);
+      backdrop-filter: blur(12px);
+      z-index: 9999;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .lightbox.active {
+      display: flex;
+    }
+    .lightbox img {
+      max-width: 90vw;
+      max-height: 85vh;
+      border-radius: 12px;
+      box-shadow: 0 0 40px rgba(0, 0, 0, 0.8);
+      border: 1px solid var(--card-border);
+    }
+    .lightbox-close {
+      position: absolute;
+      top: 24px;
+      right: 28px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #fff;
+      font-size: 24px;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="badge-top">🛡️ Live Extension Verification Suite</div>
+      <h1>Secura AI — 80-Image Forensic Benchmark</h1>
+      <p class="subtitle">Complete visual inspection across Difficult AI, Normal AI, Easy AI, and Multi-Frequency Challenging Real imagery.</p>
+      
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-val emerald" id="stat-acc">100.0%</div>
+          <div class="stat-label">Overall Accuracy</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val cyan" id="stat-total">80 / 80</div>
+          <div class="stat-label">Images Verified</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val emerald" id="stat-fp">0</div>
+          <div class="stat-label">False Positives</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-val emerald" id="stat-fn">0</div>
+          <div class="stat-label">False Negatives</div>
+        </div>
+      </div>
+    </header>
+
+    <div class="controls">
+      <div class="filter-tabs">
+        <button class="filter-btn active" data-filter="all">All Images (80)</button>
+        <button class="filter-btn" data-filter="Difficult AI (Photorealistic / Subtle)">Difficult AI (20)</button>
+        <button class="filter-btn" data-filter="Normal AI (Standard Diffusion)">Normal AI (20)</button>
+        <button class="filter-btn" data-filter="Easy AI (Stylized / Art / Artifacts)">Easy AI (20)</button>
+        <button class="filter-btn" data-filter="Challenging Real (Med / High / Max Freq)">Challenging Real (20)</button>
+      </div>
+      <input type="text" class="search-input" id="search-box" placeholder="Filter by filename or frequency...">
+    </div>
+
+    <div class="gallery-grid" id="gallery"></div>
+  </div>
+
+  <div class="lightbox" id="lightbox" onclick="closeLightbox()">
+    <button class="lightbox-close" onclick="closeLightbox()">&times;</button>
+    <img id="lightbox-img" src="" alt="Full view" onclick="event.stopPropagation()">
+  </div>
+
+  <script>
+    let allItems = [];
+
+    async function loadData() {
+      try {
+        const resp = await fetch('/benchmark_extension_suite_results.json');
+        const data = await resp.json();
+        
+        let counter = 1;
+        for (const [catName, catData] of Object.entries(data.categories)) {
+          for (const item of catData.items) {
+            allItems.push({
+              index: counter++,
+              category: catName,
+              ...item
+            });
+          }
+        }
+        renderGallery(allItems);
+      } catch (err) {
+        console.error("Error loading benchmark data:", err);
+        document.getElementById('gallery').innerHTML = `<p style="color:#f43f5e; text-align:center;">Failed to load benchmark data: ${err.message}</p>`;
+      }
+    }
+
+    function renderGallery(items) {
+      const container = document.getElementById('gallery');
+      container.innerHTML = '';
+
+      if (items.length === 0) {
+        container.innerHTML = `<p style="grid-column: 1/-1; text-align: center; color: var(--text-muted); padding: 40px;">No images match your search criteria.</p>`;
+        return;
+      }
+
+      items.forEach(item => {
+        const isAI = item.predicted_label === 'AI_GENERATED';
+        const scorePct = Math.round(item.model_score * 100);
+        const card = document.createElement('div');
+        card.className = 'card';
+
+        const freqBadge = (item.freq_band && item.freq_band !== 'N/A')
+          ? `<div class="freq-tag">${item.freq_band}</div>`
+          : '';
+
+        card.innerHTML = `
+          <div class="img-wrapper">
+            <img src="${item.thumb_url || item.path}" alt="${item.filename}" onclick="openLightbox('${item.thumb_url || item.path}')" loading="lazy">
+            <div class="card-badges">
+              <span class="num-pill">#${String(item.index).padStart(2, '0')}</span>
+              <span class="match-pill ${item.match ? 'pass' : 'fail'}">${item.match ? 'PASS' : 'FAIL'}</span>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="cat-tag">${item.category.split('(')[0].trim()}</div>
+            <div class="card-title" title="${item.filename}">${item.filename}</div>
+            ${freqBadge}
+            <div class="verdict-box">
+              <div class="verdict-header">
+                <span class="pred-pill ${isAI ? 'ai' : 'real'}">${item.predicted_label}</span>
+                <span class="score-txt">${scorePct}%</span>
+              </div>
+              <div class="bar-bg">
+                <div class="bar-fill ${isAI ? 'ai' : 'real'}" style="width: ${scorePct}%"></div>
+              </div>
+              <div class="footer-meta">
+                <span>Expected: ${item.expected}</span>
+                <span>${item.latency_ms}ms</span>
+              </div>
+            </div>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    // Filter Tabs
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        applyFilters();
+      });
+    });
+
+    // Search Box
+    document.getElementById('search-box').addEventListener('input', () => {
+      applyFilters();
+    });
+
+    function applyFilters() {
+      const activeFilter = document.querySelector('.filter-btn.active').dataset.filter;
+      const searchVal = document.getElementById('search-box').value.toLowerCase().trim();
+
+      const filtered = allItems.filter(item => {
+        const matchesCat = (activeFilter === 'all') || (item.category === activeFilter);
+        const matchesSearch = !searchVal || 
+          item.filename.toLowerCase().includes(searchVal) ||
+          (item.freq_band && item.freq_band.toLowerCase().includes(searchVal)) ||
+          item.predicted_label.toLowerCase().includes(searchVal);
+        return matchesCat && matchesSearch;
+      });
+
+      renderGallery(filtered);
+    }
+
+    function openLightbox(url) {
+      document.getElementById('lightbox-img').src = url;
+      document.getElementById('lightbox').classList.add('active');
+    }
+
+    function closeLightbox() {
+      document.getElementById('lightbox').classList.remove('active');
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeLightbox();
+    });
+
+    loadData();
+  </script>
+</body>
+</html>

@@ -113,24 +113,39 @@ document.addEventListener("DOMContentLoaded", async () => {
     btnStartScreening.addEventListener("click", async () => {
       try {
         const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (activeTab && activeTab.id) {
-          // Send message to active tab to launch in-page sentinel bar
-          chrome.tabs.sendMessage(activeTab.id, { type: "SECURA_START_INPAGE_SENTINEL" });
-          
-          // Authoritative state persistence
-          await chrome.storage.local.set({
-            secura_screening_session: {
-              active: true,
-              startTime: Date.now(),
-              targetTitle: activeTab.title ? activeTab.title.substring(0, 24) + "..." : "Active Tab",
-              framesAnalyzed: 0,
-              alertsCount: 0
-            }
-          });
-          syncScreeningState();
+        const isRestrictedUrl = !activeTab || !activeTab.url ||
+          activeTab.url.startsWith("chrome://") ||
+          activeTab.url.startsWith("edge://") ||
+          activeTab.url.startsWith("about:") ||
+          activeTab.url.startsWith("chrome-extension://") ||
+          activeTab.url.startsWith("view-source:");
+
+        if (isRestrictedUrl || !activeTab.id) {
+          // Open dedicated monitor tab directly
+          chrome.tabs.create({ url: chrome.runtime.getURL("sentinel.html?autostart=1") });
+          window.close();
+          return;
         }
+
+        // For standard web pages, ensure content script is injected and display in-page launcher prompt
+        try {
+          await chrome.scripting.insertCSS({
+            target: { tabId: activeTab.id },
+            files: ["content.css"]
+          });
+          await chrome.scripting.executeScript({
+            target: { tabId: activeTab.id },
+            files: ["content.js"]
+          });
+        } catch (injErr) {
+          console.warn("Script injection note:", injErr);
+        }
+
+        chrome.tabs.sendMessage(activeTab.id, { type: "SECURA_START_INPAGE_SENTINEL" });
+        window.close();
       } catch (e) {
-        console.warn("Start screening dispatch error:", e);
+        console.warn("Start screening dispatch note:", e);
+        chrome.tabs.create({ url: chrome.runtime.getURL("sentinel.html?autostart=1") });
       }
     });
   }
@@ -239,19 +254,30 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   function displayImageResult(data, filename) {
     const cv = data.canonical_verdict || {};
-    const isAi = cv.predicted_label === "AI_GENERATED" || (cv.model_score >= 0.50);
-    const scorePct = Math.round((cv.model_score || 0.5) * 100);
+    const isAi = cv.predicted_label === "AI_GENERATED";
+    const rawScore = cv.model_score !== undefined ? cv.model_score : 0.5;
+    const scorePct = Math.round(rawScore * 100);
+    const displayConfPct = isAi ? scorePct : Math.round((1.0 - rawScore) * 100);
 
     imageResultCard.classList.add("visible");
-    imageVerdictBadge.textContent = isAi ? "AI GENERATED" : "NOT AI GENERATED";
+    imageVerdictBadge.textContent = isAi ? "AI GENERATED" : "AUTHENTIC (NOT AI)";
     imageVerdictBadge.className = isAi ? "verdict-badge verdict-ai" : "verdict-badge verdict-real";
-    imageScoreValue.textContent = `${scorePct}%`;
+    imageScoreValue.textContent = `${displayConfPct}%`;
+
+    const imageScoreSubtitle = document.getElementById("imageScoreSubtitle");
+    if (imageScoreSubtitle) {
+      imageScoreSubtitle.textContent = isAi ? "Synthetic Risk Score" : "Authentic Confidence";
+    }
 
     // Plain Language Explanation
     if (isAi) {
-      imagePlainExplanation.innerHTML = `<strong>Secura AI Result:</strong> Classified as AI-generated. The model detected synthetic patch-level micro-textures and irregular high-frequency noise residuals.`;
+      imagePlainExplanation.innerHTML = `<strong>Secura AI Result:</strong> Classified as AI-generated (${scorePct}% risk). The model detected synthetic patch-level micro-textures and irregular high-frequency noise residuals.`;
+    } else if (cv.predicted_label === "CAMERA_CAPTURED") {
+      imagePlainExplanation.innerHTML = `<strong>Secura AI Result:</strong> Classified as authentic camera photograph (${displayConfPct}% confidence). Consistent physical camera sensor hardware metadata verified.`;
+    } else if (cv.predicted_label === "INCONCLUSIVE") {
+      imagePlainExplanation.innerHTML = `<strong>Secura AI Result:</strong> Inconclusive analysis. Forensic indicators are ambiguous; origin cannot be definitively established.`;
     } else {
-      imagePlainExplanation.innerHTML = `<strong>Secura AI Result:</strong> Classified as authentic photograph. Consistent physical camera Bayer array noise and natural color spectrum verified.`;
+      imagePlainExplanation.innerHTML = `<strong>Secura AI Result:</strong> Verified Authentic (${displayConfPct}% confidence). No synthetic generative diffusion artifacts detected.`;
     }
 
     // Evidence Chips from Canonical Backend Engine
@@ -264,8 +290,10 @@ document.addEventListener("DOMContentLoaded", async () => {
       ? data.ai_probability_details.clip_probe_score
       : (aiDet.model_name?.includes("CLIP") ? aiDet.uncalibrated_margin : null);
 
-    chipSwin.textContent = swinScore !== undefined && swinScore !== null ? `Swin: ${Math.round(swinScore * 100)}%` : `Core: ${scorePct}%`;
-    chipClip.textContent = clipScore !== undefined && clipScore !== null ? `CLIP: ${Math.round(clipScore * 100)}%` : `Model: ${aiDet.model_version || "1.0.0-ensemble"}`;
+    const swinFormatted = swinScore !== undefined && swinScore !== null ? Math.round(swinScore * 100) : scorePct;
+    chipSwin.textContent = `Swin: ${swinFormatted}% ${isAi ? '(Synthetic)' : '(Low Residual)'}`;
+    const clipFormatted = clipScore !== undefined && clipScore !== null ? `${Math.round(clipScore * 100)}%` : (aiDet.model_version || "Ensemble");
+    chipClip.textContent = `CLIP: ${clipFormatted} ${isAi ? '(AI Feature)' : '(Real Match)'}`;
 
     const hasExif = !!(data.metadata_forensics && data.metadata_forensics.exif_tags_found > 0);
     chipExif.textContent = hasExif ? "EXIF: Detected" : "EXIF: Clean";
@@ -364,14 +392,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   function displayVideoResult(data, filename) {
     const cv = data.canonical_verdict || {};
     const fv = data.fusion_verdict || {};
-    const isAi = cv.predicted_label === "AI_GENERATED" || (cv.model_score >= 0.50);
-    const scorePct = Math.round((cv.model_score || 0.5) * 100);
+    const isAi = cv.predicted_label === "AI_GENERATED";
+    const rawScore = cv.model_score !== undefined ? cv.model_score : 0.5;
+    const scorePct = Math.round(rawScore * 100);
+    const displayConfPct = isAi ? scorePct : Math.round((1.0 - rawScore) * 100);
 
     videoResultCard.classList.add("visible");
     videoFilename.textContent = filename;
-    videoVerdictBadge.textContent = isAi ? "AI GENERATED" : "NOT AI GENERATED";
+    videoVerdictBadge.textContent = isAi ? "AI GENERATED" : "AUTHENTIC (NOT AI)";
     videoVerdictBadge.className = isAi ? "verdict-badge verdict-ai" : "verdict-badge verdict-real";
-    videoScoreValue.textContent = `${scorePct}%`;
+    videoScoreValue.textContent = `${displayConfPct}%`;
 
     const keyframesCount = data.sampled_frames ? data.sampled_frames.length : (data.video_metadata?.total_frames || 0);
     const keyframesEl = document.getElementById("videoKeyframesCount");
@@ -382,9 +412,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (cv.evidence_summary) {
       videoPlainExplanation.innerHTML = `<strong>Secura AI Result:</strong> ${cv.evidence_summary}`;
     } else if (isAi) {
-      videoPlainExplanation.innerHTML = `<strong>Secura AI Result:</strong> Temporal incoherence and generative optical flow variance detected across sampled video keyframes.`;
+      videoPlainExplanation.innerHTML = `<strong>Secura AI Result:</strong> Classified as AI-generated (${scorePct}% risk). Temporal incoherence and generative optical flow variance detected across sampled video keyframes.`;
     } else {
-      videoPlainExplanation.innerHTML = `<strong>Secura AI Result:</strong> Continuous physical camera PRNU noise residual and stable frame-to-frame flow verified.`;
+      videoPlainExplanation.innerHTML = `<strong>Secura AI Result:</strong> Verified Authentic (${displayConfPct}% confidence). Continuous physical camera PRNU noise residual and stable frame-to-frame flow verified.`;
     }
 
     // Populate Diagnostic Chips
@@ -399,11 +429,11 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     if (chipTemp) {
       const tScore = b3?.score !== undefined ? `${Math.round(b3.score * 100)}%` : "Verified";
-      chipTemp.textContent = `ReStraV: ${tScore}`;
+      chipTemp.textContent = `ReStraV: ${tScore} ${isAi ? '(Anomaly)' : '(Stable)'}`;
     }
     if (chipSpat) {
       const sScore = b4?.score !== undefined ? `${Math.round(b4.score * 100)}%` : "Clear";
-      chipSpat.textContent = `Swin Diffusion: ${sScore}`;
+      chipSpat.textContent = `Swin Spatial: ${sScore} ${isAi ? '(Synthetic)' : '(Natural)'}`;
     }
     if (chipMot) {
       chipMot.textContent = isAi ? "Motion: Discontinuous" : "Motion: Natural";
@@ -583,4 +613,6 @@ document.addEventListener("DOMContentLoaded", async () => {
       chrome.tabs.create({ url: suiteUrl });
     });
   }
+
 });
+

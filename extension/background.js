@@ -31,8 +31,18 @@ function setupContextMenu() {
     }, () => {
       if (chrome.runtime.lastError) {
         console.warn("Sentinel menu create note:", chrome.runtime.lastError.message);
+      }
+    });
+
+    chrome.contextMenus.create({
+      id: "secura_brahma_prepub",
+      title: "⚖️ BRAHMA Pre-Publication Policy Check",
+      contexts: ["all"]
+    }, () => {
+      if (chrome.runtime.lastError) {
+        console.warn("BRAHMA menu create note:", chrome.runtime.lastError.message);
       } else {
-        console.log("Secura AI context menus registered.");
+        console.log("Secura AI & BRAHMA context menus registered.");
       }
     });
   });
@@ -78,18 +88,29 @@ async function ensureContentInjected(tabId) {
 }
 
 // Ensure image payload is JPEG or PNG for the forensic pipeline
-async function ensureJpegOrPngBlob(inputBlob) {
+async function ensureJpegOrPngBlob(inputBlob, url) {
   try {
+    let cleanFilename = null;
+    if (url) {
+      try {
+        const u = new URL(url);
+        const p = u.pathname.split("/").pop();
+        if (p && p.length < 80 && /\.(jpe?g|png|webp|avif)$/i.test(p)) {
+          cleanFilename = p;
+        }
+      } catch {}
+    }
+
     const buf = await inputBlob.slice(0, 16).arrayBuffer();
     const bytes = new Uint8Array(buf);
     const isJpeg = bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF;
     const isPng = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47;
 
     if (isJpeg) {
-      return { blob: inputBlob, filename: "web_inspected_asset.jpg" };
+      return { blob: inputBlob, filename: cleanFilename && /\.(jpe?g)$/i.test(cleanFilename) ? cleanFilename : "web_inspected_asset.jpg" };
     }
     if (isPng) {
-      return { blob: inputBlob, filename: "web_inspected_asset.png" };
+      return { blob: inputBlob, filename: cleanFilename && /\.png$/i.test(cleanFilename) ? cleanFilename : "web_inspected_asset.png" };
     }
 
     // Transcode WebP, AVIF, or other image formats into pure PNG via OffscreenCanvas
@@ -98,7 +119,7 @@ async function ensureJpegOrPngBlob(inputBlob) {
     const ctx = canvas.getContext("2d");
     ctx.drawImage(bitmap, 0, 0);
     const pngBlob = await canvas.convertToBlob({ type: "image/png" });
-    return { blob: pngBlob, filename: "web_inspected_asset.png" };
+    return { blob: pngBlob, filename: cleanFilename ? cleanFilename.replace(/\.[^.]+$/, ".png") : "web_inspected_asset.png" };
   } catch (err) {
     console.warn("Blob transcode note:", err);
     return { blob: inputBlob, filename: "web_inspected_asset.png" };
@@ -115,11 +136,15 @@ async function cropScreenshotBlob(fullDataUrl, rect) {
     const resp = await fetch(fullDataUrl);
     const blob = await resp.blob();
     const bitmap = await createImageBitmap(blob);
-    const dpr = rect.dpr || 1;
-    const sx = Math.max(0, Math.round(rect.left * dpr));
-    const sy = Math.max(0, Math.round(rect.top * dpr));
-    const sw = Math.min(bitmap.width - sx, Math.round(rect.width * dpr));
-    const sh = Math.min(bitmap.height - sy, Math.round(rect.height * dpr));
+    
+    // Compute exact physical-to-CSS pixel scaling factor to handle Windows display scaling & browser zoom
+    const scaleX = (rect.windowWidth && rect.windowWidth > 0) ? (bitmap.width / rect.windowWidth) : (rect.dpr || 1);
+    const scaleY = (rect.windowHeight && rect.windowHeight > 0) ? (bitmap.height / rect.windowHeight) : (rect.dpr || 1);
+
+    const sx = Math.max(0, Math.round(rect.left * scaleX));
+    const sy = Math.max(0, Math.round(rect.top * scaleY));
+    const sw = Math.min(bitmap.width - sx, Math.round(rect.width * scaleX));
+    const sh = Math.min(bitmap.height - sy, Math.round(rect.height * scaleY));
 
     if (sw <= 10 || sh <= 10) return blob;
 
@@ -142,7 +167,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     return;
   }
 
-  if (info.menuItemId !== "secura_inspect_media" || !tab || !tab.id) return;
+  if ((info.menuItemId !== "secura_inspect_media" && info.menuItemId !== "secura_brahma_prepub") || !tab || !tab.id) return;
 
   // Don't run on restricted internal browser pages
   if (tab.url?.startsWith("chrome://") || tab.url?.startsWith("edge://") || tab.url?.startsWith("about:")) {
@@ -194,89 +219,280 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   await performMediaInspection(tab.id, targetUrl, clickedMediaInfo);
 });
 
+// Rapidly capture sequential viewport frames from playing video tab
+async function captureTabFrameSequence(tabId, rect, count = 8, intervalMs = 120) {
+  const frames = [];
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    for (let i = 0; i < count; i++) {
+      const shotUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+      if (shotUrl) {
+        const cropped = await cropScreenshotBlob(shotUrl, rect);
+        if (cropped && cropped.size > 200) {
+          frames.push(cropped);
+        }
+      }
+      if (i < count - 1) {
+        await new Promise(r => setTimeout(r, intervalMs));
+      }
+    }
+  } catch (err) {
+    console.warn("captureTabFrameSequence notice:", err);
+  }
+  return frames;
+}
+
 // Reusable media inspection pipeline for both context menu and in-page click inspect
 async function performMediaInspection(tabId, targetUrl, clickedMediaInfo = null) {
   try {
     let blob = null;
+    let frameBlobs = [];
 
-    // A. Handle data: URLs directly
-    if (targetUrl.startsWith("data:")) {
-      const resp = await fetch(targetUrl);
-      blob = await resp.blob();
-    } else {
-      // B. Attempt direct fetch in extension service worker
-      try {
-        const assetResp = await fetch(targetUrl, {
-          headers: {
-            "Accept": "image/jpeg,image/png;q=0.9,*/*;q=0.5"
-          }
-        });
-        if (assetResp.ok) {
-          blob = await assetResp.blob();
-        }
-      } catch (fetchErr) {
-        console.warn("Direct fetch failed, trying in-page canvas extraction:", fetchErr);
-      }
+    let isVideoTarget = clickedMediaInfo?.mediaType === "video" || 
+      (targetUrl && /\.(mp4|webm|mov)(\?|$)/i.test(targetUrl)) || 
+      (targetUrl && targetUrl.startsWith("data:video/")) ||
+      Boolean(clickedMediaInfo && clickedMediaInfo.videoDataUrl);
+    let isFallbackFrameFromVideo = false;
+    let targetRect = clickedMediaInfo?.rect || null;
 
-      // C. Fallback: Request in-page canvas extraction from content script
-      if (!blob || blob.size === 0) {
-        const pageExtraction = await new Promise((resolve) => {
-          chrome.tabs.sendMessage(tabId, { type: "SECURA_EXTRACT_ASSET_DATA_URL" }, (resp) => {
-            resolve(resp);
+    if (isVideoTarget) {
+      // --- VIDEO / REEL ACQUISITION PIPELINE ---
+      // A. Data URLs directly
+      if (clickedMediaInfo?.videoDataUrl) {
+        const resp = await fetch(clickedMediaInfo.videoDataUrl);
+        blob = await resp.blob();
+      } else if (targetUrl && targetUrl.startsWith("data:video/")) {
+        const resp = await fetch(targetUrl);
+        blob = await resp.blob();
+      } else if (targetUrl && targetUrl.startsWith("http")) {
+        // B. Attempt direct video asset download
+        try {
+          const assetResp = await fetch(targetUrl, {
+            headers: {
+              "Accept": "video/mp4,video/webm,video/*;q=0.9,*/*;q=0.5"
+            }
           });
-        });
-
-        if (pageExtraction && pageExtraction.dataUrl) {
-          const resp = await fetch(pageExtraction.dataUrl);
-          blob = await resp.blob();
+          if (assetResp.ok) {
+            const fetched = await assetResp.blob();
+            if (fetched && fetched.size > 2000) {
+              blob = fetched;
+            }
+          }
+        } catch (fetchErr) {
+          console.warn("Direct video asset fetch failed, trying in-page stream capture:", fetchErr);
         }
       }
 
-      // D. Ultimate Fallback for restricted CDNs / tainted canvas:
+      // C. In-page recording via MediaRecorder / Canvas
       if (!blob || blob.size === 0) {
         try {
-          const tab = await chrome.tabs.get(tabId);
-          const screenshotUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
-          if (screenshotUrl) {
-            blob = await cropScreenshotBlob(screenshotUrl, clickedMediaInfo?.rect);
+          const streamCapture = await new Promise((resolve) => {
+            chrome.tabs.sendMessage(tabId, { type: "SECURA_CAPTURE_VIDEO_STREAM" }, (resp) => {
+              resolve(resp);
+            });
+          });
+
+          if (streamCapture) {
+            if (streamCapture.rect) {
+              targetRect = streamCapture.rect;
+            }
+            if (streamCapture.videoDataUrl) {
+              const resp = await fetch(streamCapture.videoDataUrl);
+              const b = await resp.blob();
+              if (b && b.size > 1000) {
+                blob = b;
+              }
+            } else if (streamCapture.frameSequence && streamCapture.frameSequence.length >= 2) {
+              for (const fUrl of streamCapture.frameSequence) {
+                const r = await fetch(fUrl);
+                frameBlobs.push(await r.blob());
+              }
+            } else if (streamCapture.frameDataUrl) {
+              const resp = await fetch(streamCapture.frameDataUrl);
+              blob = await resp.blob();
+              isFallbackFrameFromVideo = true;
+            }
+          }
+        } catch (streamErr) {
+          console.warn("In-page stream capture error:", streamErr);
+        }
+      }
+
+      // D. Resilient Multi-Frame Tab Viewport Sequence for Reels (e.g. cross-origin MSE on Instagram, TikTok, YouTube Shorts)
+      if ((!blob || blob.size === 0) && frameBlobs.length < 2) {
+        try {
+          const capturedFrames = await captureTabFrameSequence(tabId, targetRect, 8, 120);
+          if (capturedFrames && capturedFrames.length >= 2) {
+            frameBlobs = capturedFrames;
+          } else if (capturedFrames && capturedFrames.length === 1) {
+            blob = capturedFrames[0];
+            isFallbackFrameFromVideo = true;
           }
         } catch (captureErr) {
-          console.warn("Tab capture fallback error:", captureErr);
+          console.warn("Video viewport capture fallback error:", captureErr);
+        }
+      }
+    } else {
+      // --- IMAGE ACQUISITION PIPELINE ---
+      // A. Handle data: URLs directly
+      if (targetUrl && targetUrl.startsWith("data:")) {
+        const resp = await fetch(targetUrl);
+        blob = await resp.blob();
+      } else {
+        // B. Attempt direct fetch in extension service worker
+        try {
+          const assetResp = await fetch(targetUrl, {
+            headers: {
+              "Accept": "image/jpeg,image/png;q=0.9,*/*;q=0.5"
+            }
+          });
+          if (assetResp.ok) {
+            blob = await assetResp.blob();
+          }
+        } catch (fetchErr) {
+          console.warn("Direct fetch failed, trying in-page canvas extraction:", fetchErr);
+        }
+
+        // C. Fallback: Request in-page canvas extraction from content script
+        if (!blob || blob.size === 0) {
+          const pageExtraction = await new Promise((resolve) => {
+            chrome.tabs.sendMessage(tabId, { type: "SECURA_EXTRACT_ASSET_DATA_URL" }, (resp) => {
+              resolve(resp);
+            });
+          });
+
+          if (pageExtraction && pageExtraction.dataUrl) {
+            const resp = await fetch(pageExtraction.dataUrl);
+            blob = await resp.blob();
+          }
+        }
+
+        // D. Ultimate Fallback for restricted CDNs / tainted canvas:
+        if (!blob || blob.size === 0) {
+          try {
+            const tab = await chrome.tabs.get(tabId);
+            const screenshotUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+            if (screenshotUrl) {
+              blob = await cropScreenshotBlob(screenshotUrl, targetRect);
+            }
+          } catch (captureErr) {
+            console.warn("Tab capture fallback error:", captureErr);
+          }
         }
       }
     }
 
-    if (!blob || blob.size === 0) {
-      throw new Error("Unable to capture media asset bytes. Please try right-clicking directly on the image.");
+    if ((!blob || blob.size === 0) && frameBlobs.length === 0) {
+      throw new Error(
+        isVideoTarget
+          ? "Unable to record or capture video stream bytes for this Reel. Please ensure the video is playing."
+          : "Unable to capture media asset bytes. Please try right-clicking directly on the image."
+      );
     }
 
-    // 3. Check if target is a video file or stream
-    const isVideoTarget = clickedMediaInfo?.mediaType === "video" || 
-      (targetUrl && /\.(mp4|webm|mov)(\?|$)/i.test(targetUrl)) || 
-      (blob.type && blob.type.startsWith("video/"));
-
+    // 2. Select Forensic Pipeline Endpoint & Format
     let apiEndpoint = `${API_BASE_URL}/api/v1/analyze/image?probe=Ensemble`;
-    let uploadBlob = null;
-    let uploadFilename = "web_inspected_asset.png";
+    const formData = new FormData();
 
-    if (isVideoTarget && blob.type && blob.type.startsWith("video/")) {
-      apiEndpoint = `${API_BASE_URL}/api/v1/analyze/video?preset=fast`;
-      uploadBlob = blob;
-      uploadFilename = targetUrl.split("/").pop().split("?")[0] || "web_inspected_video.mp4";
-    } else {
-      const { blob: preparedBlob, filename } = await ensureJpegOrPngBlob(blob);
-      uploadBlob = preparedBlob;
-      uploadFilename = filename;
+    // Use a safe filename — strip obfuscated CDN token filenames (e.g. AQM...Q.mp4 from Instagram)
+    // and replace with a stable generic name so the backend uses magic-byte detection.
+    function safeVideoFilename(blob, url) {
+      if (blob.type.includes("webm")) return "web_inspected_reel.webm";
+      if (blob.type.includes("mp4"))  return "web_inspected_reel.mp4";
+      // URL-based filename — only use if it looks like a plain filename, not a CDN token
+      if (url) {
+        const urlFile = url.split("/").pop().split("?")[0];
+        if (urlFile && urlFile.length < 60 && /\.(mp4|webm|mov)$/i.test(urlFile)) {
+          return urlFile;
+        }
+      }
+      return "web_inspected_reel.webm"; // default — backend will detect from magic bytes
     }
 
-    // Send to local Secura Forensic Backend
-    const formData = new FormData();
-    formData.append("file", uploadBlob, uploadFilename);
+    if (isVideoTarget && !isFallbackFrameFromVideo && blob && blob.type && blob.type.includes("video")) {
+      // Direct WebM or MP4 video container
+      apiEndpoint = `${API_BASE_URL}/api/v1/analyze/video?preset=fast`;
+      formData.append("file", blob, safeVideoFilename(blob, targetUrl));
+    } else if (isVideoTarget && frameBlobs.length >= 2) {
+      // Multi-Frame Video Stream Sequence
+      apiEndpoint = `${API_BASE_URL}/api/v1/analyze/video/frames?preset=fast`;
+      frameBlobs.forEach((fBlob, idx) => {
+        formData.append("files", fBlob, `reel_frame_${idx}.jpg`);
+      });
+      formData.append("fps", "8.0");
+    } else {
+      // Image target OR single video viewport frame fallback
+      const { blob: preparedBlob, filename } = await ensureJpegOrPngBlob(blob, targetUrl);
+      let uploadFilename = filename;
+      if (isVideoTarget || isFallbackFrameFromVideo) {
+        uploadFilename = "video_frame_inspected.jpg";
+        apiEndpoint = `${API_BASE_URL}/api/v1/analyze/image?probe=ExtensionImageDetectorV1&source_type=video_frame`;
+      } else {
+        apiEndpoint = `${API_BASE_URL}/api/v1/analyze/image?probe=ExtensionImageDetectorV1`;
+      }
+      formData.append("file", preparedBlob, uploadFilename);
+    }
 
-    const apiResp = await fetch(apiEndpoint, {
-      method: "POST",
-      body: formData
-    });
+    if (targetUrl) {
+      formData.append("acquisition_url", targetUrl);
+    }
+
+    let apiResp = null;
+    try {
+      apiResp = await fetch(apiEndpoint, {
+        method: "POST",
+        body: formData
+      });
+    } catch (netErr) {
+      // Attempt localhost <-> 127.0.0.1 failover
+      if (apiEndpoint.includes("127.0.0.1:8000")) {
+        const altEndpoint = apiEndpoint.replace("127.0.0.1:8000", "localhost:8000");
+        apiResp = await fetch(altEndpoint, { method: "POST", body: formData });
+      } else if (apiEndpoint.includes("localhost:8000")) {
+        const altEndpoint = apiEndpoint.replace("localhost:8000", "127.0.0.1:8000");
+        apiResp = await fetch(altEndpoint, { method: "POST", body: formData });
+      } else {
+        throw netErr;
+      }
+    }
+
+    // If video upload hit a decode error (e.g. MSE/DRM stream that couldn't be read),
+    // automatically retry via the frame-based image pipeline using viewport screenshot.
+    if (!apiResp.ok && isVideoTarget) {
+      let errJson = null;
+      try { errJson = await apiResp.clone().json(); } catch { /* ignore */ }
+      const isDecodeError = errJson &&
+        (errJson.detail?.error_code === "VIDEO_DECODING_ERROR" ||
+         (typeof errJson.detail === "string" && errJson.detail.includes("Could not open video stream")));
+
+      if (isDecodeError) {
+        // Build a fallback frame FormData from the best available frame
+        const fallbackFd = new FormData();
+        let fallbackBlob = null;
+
+        if (frameBlobs.length >= 1) {
+          fallbackBlob = frameBlobs[0];
+        } else if (blob && !blob.type.includes("video")) {
+          fallbackBlob = blob;
+        } else {
+          // Capture a viewport screenshot as last resort
+          try {
+            const tab = await chrome.tabs.get(tabId);
+            const shotUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 90 });
+            const shotResp = await fetch(shotUrl);
+            fallbackBlob = await shotResp.blob();
+          } catch { /* ignore */ }
+        }
+
+        if (fallbackBlob) {
+          const { blob: fb, filename: fn } = await ensureJpegOrPngBlob(fallbackBlob);
+          fallbackFd.append("file", fb, "reel_frame_fallback.jpg");
+          if (targetUrl) fallbackFd.append("acquisition_url", targetUrl);
+          const fallbackEndpoint = `${API_BASE_URL}/api/v1/analyze/image?probe=Ensemble&source_type=video_frame`;
+          apiResp = await fetch(fallbackEndpoint, { method: "POST", body: fallbackFd });
+        }
+      }
+    }
 
     if (!apiResp.ok) {
       let errDetail = `HTTP ${apiResp.status}`;
@@ -309,7 +525,7 @@ async function performMediaInspection(tabId, targetUrl, clickedMediaInfo = null)
 
     const forensicData = await apiResp.json();
 
-    // 4. Send forensic verdict to tab
+    // 4. Send canonical forensic verdict to tab
     chrome.tabs.sendMessage(tabId, {
       type: "SECURA_SCAN_COMPLETE",
       data: forensicData,
@@ -330,6 +546,12 @@ async function performMediaInspection(tabId, targetUrl, clickedMediaInfo = null)
 
 // Listener for messages from popup and content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.type === "SECURA_OPEN_SENTINEL_WINDOW") {
+    chrome.tabs.create({ url: chrome.runtime.getURL("sentinel.html?autostart=1") });
+    sendResponse({ status: "opened" });
+    return true;
+  }
+
   if (request.type === "SECURA_OPEN_SENTINEL_PAGE" || request.type === "SECURA_START_INPAGE_SENTINEL") {
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
       const activeTab = tabs && tabs[0];
@@ -342,12 +564,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  if (request.type === "SECURA_INSPECT_MEDIA_TARGET") {
+    const tabId = sender.tab ? sender.tab.id : null;
+    if (tabId && request.mediaInfo) {
+      ensureContentInjected(tabId).then(() => {
+        chrome.tabs.sendMessage(tabId, { type: "SECURA_SCAN_STARTING" });
+        performMediaInspection(tabId, request.mediaInfo.mediaUrl, request.mediaInfo);
+      });
+    }
+    sendResponse({ status: "analyzing" });
+    return true;
+  }
+
   if (request.type === "SECURA_INSPECT_MEDIA_URL") {
     const tabId = sender.tab ? sender.tab.id : null;
     if (tabId && request.url) {
       ensureContentInjected(tabId).then(() => {
         chrome.tabs.sendMessage(tabId, { type: "SECURA_SCAN_STARTING" });
-        performMediaInspection(tabId, request.url, { rect: request.rect });
+        performMediaInspection(tabId, request.url, { rect: request.rect, mediaType: request.mediaType });
       });
     }
     sendResponse({ status: "analyzing" });
@@ -383,3 +617,4 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 });
+
