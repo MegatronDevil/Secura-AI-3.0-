@@ -63,17 +63,32 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
     setShieldStatus("ANALYZING");
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error("Browser mediaDevices API not available.");
+        throw new Error(
+          typeof window !== "undefined" && window.isSecureContext === false
+            ? "Camera access requires a secure context (https:// or http://localhost:5173). Browsers block media devices on unencrypted IP addresses."
+            : "Browser mediaDevices API not available in this environment."
+        );
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1280, min: 640 },
-          height: { ideal: 720, min: 480 },
-          facingMode: "user",
-        },
-        audio: false,
-      });
+      let stream: MediaStream;
+      try {
+        // Attempt ideal webcam configuration
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            facingMode: "user",
+          },
+          audio: false,
+        });
+      } catch (constraintErr) {
+        console.warn("Ideal camera constraints failed, attempting fallback to generic video:", constraintErr);
+        // Resilient fallback for desktop webcams, virtual cameras, or devices that don't support facingMode/1280x720
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
+      }
 
       streamRef.current = stream;
       isStreamingRef.current = true;
@@ -83,6 +98,9 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
         videoRef.current.srcObject = stream;
         videoRef.current.muted = true;
         videoRef.current.playsInline = true;
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current?.play().catch((playErr) => console.warn("Video onloadedmetadata play note:", playErr));
+        };
         try {
           await videoRef.current.play();
         } catch (playErr) {
@@ -95,7 +113,11 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
       console.error("Camera access error:", err);
       const msg =
         err.name === "NotAllowedError" || err.name === "PermissionDeniedError"
-          ? "Camera permission denied by browser. You can click 'Run Simulated Feed' to test."
+          ? "Camera permission denied by browser. Please allow camera permissions in your address bar, or click 'Run Simulated Feed' to test."
+          : err.name === "NotFoundError" || err.name === "DevicesNotFoundError"
+          ? "No physical or virtual webcam was found on this system. You can click 'Run Simulated Feed' to test."
+          : err.name === "NotReadableError" || err.name === "TrackStartError"
+          ? "Camera is already in use by another application (e.g. Zoom, Teams). Please close other camera apps and retry."
           : `Camera notice: ${err.message || "Device unavailable"}`;
       setCameraError(msg);
       isStreamingRef.current = false;
@@ -119,12 +141,20 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
         throw new Error("Screen capture API not supported in this browser.");
       }
 
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: {
-          cursor: "always",
-        } as any,
-        audio: false,
-      });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            cursor: "always",
+          } as any,
+          audio: false,
+        });
+      } catch (optErr) {
+        stream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: false,
+        });
+      }
 
       streamRef.current = stream;
       isStreamingRef.current = true;
@@ -139,6 +169,9 @@ export const WebcamDeepfakeShield: React.FC<WebcamDeepfakeShieldProps> = ({ onBa
         videoRef.current.srcObject = stream;
         videoRef.current.muted = true;
         videoRef.current.playsInline = true;
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current?.play().catch((playErr) => console.warn("Screen video onloadedmetadata play note:", playErr));
+        };
         try {
           await videoRef.current.play();
         } catch (playErr) {

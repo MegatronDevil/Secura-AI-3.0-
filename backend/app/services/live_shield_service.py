@@ -184,7 +184,7 @@ class LiveShieldService:
 
         for tag, crop_img in crops_to_check:
             res_c = detector.detect(crop_img, is_video_frame=True)
-            if res_c and res_c.available:
+            if res_c and res_c.available and res_c.uncalibrated_margin is not None:
                 c_score = float(res_c.uncalibrated_margin)
                 if c_score > max_score:
                     max_score = c_score

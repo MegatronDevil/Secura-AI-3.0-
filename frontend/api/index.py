@@ -1360,3 +1360,208 @@ async def get_social_policy():
         "auto_watermark": True,
         "quarantine_enabled": True
     }
+
+# --- Live Shield / Stream Endpoints ---
+@app.post("/api/v1/stream/liveness-frame")
+async def liveness_frame(file: UploadFile = File(...)):
+    """Lightweight liveness check for webcam frames using PIL only (no torch)."""
+    try:
+        data = await file.read()
+        img = Image.open(io.BytesIO(data)).convert("RGB")
+        arr = np.array(img, dtype=np.float32)
+
+        # Simple texture variance as liveness proxy
+        gray = arr.mean(axis=2)
+        local_std = float(np.std(gray))
+        brightness = float(gray.mean())
+
+        # ELA-based score (reuse from image analysis logic)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        buf.seek(0)
+        recompressed = Image.open(buf).convert("RGB")
+        ela_arr = np.abs(arr - np.array(recompressed, dtype=np.float32))
+        ela_score = float(ela_arr.mean())
+
+        # Heuristic: live faces have moderate variance, brightness, and low ELA
+        liveness_score = min(1.0, max(0.0, (local_std / 60.0) * 0.5 + (1.0 - ela_score / 20.0) * 0.5))
+        is_live = liveness_score > 0.35
+        deepfake_prob = max(0.0, min(1.0, ela_score / 15.0 + (1.0 - local_std / 80.0) * 0.3))
+
+        return {
+            "frame_id": str(uuid.uuid4()),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "liveness_score": round(liveness_score, 4),
+            "is_live": is_live,
+            "deepfake_probability": round(deepfake_prob, 4),
+            "verdict": "REAL" if deepfake_prob < 0.5 else "DEEPFAKE_SUSPECTED",
+            "display_label": "LIVE" if is_live else "SPOOF DETECTED",
+            "confidence": round(abs(deepfake_prob - 0.5) * 2, 4),
+            "metrics": {
+                "texture_variance": round(local_std, 4),
+                "brightness": round(brightness, 4),
+                "ela_score": round(ela_score, 4),
+            },
+            "engine": "secura-lite-pil"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Frame processing error: {str(e)}")
+
+# --- Seal / C2PA Endpoints ---
+@app.post("/api/v1/seal/image")
+async def seal_image(file: UploadFile = File(...), metadata: Optional[str] = Form(None)):
+    """Lightweight image sealing with PIL-based watermark (C2PA stub)."""
+    try:
+        data = await file.read()
+        img = Image.open(io.BytesIO(data)).convert("RGB")
+        arr = np.array(img)
+
+        # Invisible LSB watermark as provenance stub
+        seal_id = str(uuid.uuid4())
+        seal_time = datetime.now(timezone.utc).isoformat()
+        watermark_bits = hashlib.sha256(seal_id.encode()).digest()
+
+        # Embed 32 bytes into blue channel LSBs
+        flat = arr[:, :, 2].flatten()
+        for i, byte in enumerate(watermark_bits):
+            if i < len(flat):
+                flat[i] = (flat[i] & 0xFE) | ((byte >> 7) & 1)
+        arr[:, :, 2] = flat.reshape(arr.shape[:2])
+        sealed_img = Image.fromarray(arr.astype(np.uint8))
+
+        buf = io.BytesIO()
+        sealed_img.save(buf, format="PNG")
+        sealed_b64 = base64.b64encode(buf.getvalue()).decode()
+
+        return {
+            "seal_id": seal_id,
+            "timestamp": seal_time,
+            "status": "SEALED",
+            "method": "lsb_watermark_sha256",
+            "original_filename": file.filename,
+            "sealed_image_b64": sealed_b64,
+            "provenance": {
+                "tool": "Secura AI Forensic Engine",
+                "version": "1.0.0",
+                "seal_hash": hashlib.sha256(data).hexdigest()
+            },
+            "c2pa_note": "Full C2PA signing requires backend with PyTorch. This is a lightweight LSB provenance seal."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Seal error: {str(e)}")
+
+# --- Batch Analysis Endpoint ---
+@app.post("/api/v1/batch/analyze")
+async def batch_analyze(files: List[UploadFile] = File(...)):
+    """Batch image analysis using the same PIL-based engine."""
+    results = []
+    for f in files:
+        try:
+            data = await f.read()
+            dummy = UploadFile(file=io.BytesIO(data), filename=f.filename)
+            res = await analyze_image(file=dummy)
+            res["filename"] = f.filename
+            results.append(res)
+        except Exception as e:
+            results.append({
+                "filename": f.filename,
+                "error": str(e),
+                "canonical_verdict": {"predicted_label": "ERROR", "display_label": "ERROR"}
+            })
+    return {
+        "batch_id": str(uuid.uuid4()),
+        "total": len(results),
+        "completed": sum(1 for r in results if "error" not in r),
+        "failed": sum(1 for r in results if "error" in r),
+        "results": results
+    }
+
+# --- Explain / Heatmap Endpoint ---
+@app.post("/api/v1/explain/heatmap")
+async def explain_heatmap(file: UploadFile = File(...)):
+    """Generate a simple ELA-based saliency heatmap for explainability."""
+    try:
+        data = await file.read()
+        img = Image.open(io.BytesIO(data)).convert("RGB")
+        orig_arr = np.array(img, dtype=np.float32)
+
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=75)
+        buf.seek(0)
+        recomp = Image.open(buf).convert("RGB")
+        ela_arr = np.abs(orig_arr - np.array(recomp, dtype=np.float32))
+
+        # Normalize ELA to 0-255 and colorize as heatmap
+        ela_norm = (ela_arr.mean(axis=2) / max(ela_arr.max(), 1) * 255).astype(np.uint8)
+        heatmap = Image.fromarray(ela_norm).convert("RGB")
+        heatmap = heatmap.resize(img.size, Image.LANCZOS)
+
+        # Overlay on original
+        blended = Image.blend(img, heatmap, alpha=0.5)
+        out_buf = io.BytesIO()
+        blended.save(out_buf, format="PNG")
+        heatmap_b64 = base64.b64encode(out_buf.getvalue()).decode()
+
+        return {
+            "heatmap_b64": heatmap_b64,
+            "method": "ela_saliency",
+            "description": "Error Level Analysis saliency map highlighting potential manipulation regions.",
+            "engine": "secura-lite-pil"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Heatmap error: {str(e)}")
+
+# --- BRAHMA Policy Engine Stubs ---
+@app.get("/api/v1/brahma/sources")
+async def brahma_sources():
+    return {
+        "sources": [
+            {"id": "src_1", "name": "NDTV", "url": "https://ndtv.com", "type": "news", "trust_score": 0.92, "status": "HEALTHY"},
+            {"id": "src_2", "name": "Reuters", "url": "https://reuters.com", "type": "news", "trust_score": 0.97, "status": "HEALTHY"},
+            {"id": "src_3", "name": "BBC", "url": "https://bbc.com", "type": "news", "trust_score": 0.95, "status": "HEALTHY"},
+            {"id": "src_4", "name": "The Hindu", "url": "https://thehindu.com", "type": "news", "trust_score": 0.90, "status": "HEALTHY"},
+        ],
+        "total": 4,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+class BrahmaEvaluateRequest(BaseModel):
+    claim: Optional[str] = None
+    text: Optional[str] = None
+    image_url: Optional[str] = None
+    source_ids: Optional[List[str]] = None
+
+@app.post("/api/v1/brahma/evaluate")
+async def brahma_evaluate(req: BrahmaEvaluateRequest):
+    claim = req.claim or req.text or ""
+    score = 0.5 + (len(claim) % 11) * 0.03  # deterministic stub
+    score = min(0.98, max(0.02, score))
+    verdict = "LIKELY_TRUE" if score > 0.6 else ("UNCERTAIN" if score > 0.4 else "LIKELY_FALSE")
+    return {
+        "evaluation_id": str(uuid.uuid4()),
+        "claim": claim[:200],
+        "verdict": verdict,
+        "confidence": round(score, 4),
+        "sources_checked": req.source_ids or ["src_1", "src_2"],
+        "reasoning": f"Lightweight BRAHMA policy evaluation (backend engine unavailable). Score: {score:.2f}",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "engine": "brahma-lite-stub"
+    }
+
+@app.get("/api/v1/brahma/source-health")
+async def brahma_source_health():
+    return {
+        "overall_health": "GOOD",
+        "sources": [
+            {"id": "src_1", "name": "NDTV", "latency_ms": 142, "status": "UP", "last_checked": datetime.now(timezone.utc).isoformat()},
+            {"id": "src_2", "name": "Reuters", "latency_ms": 98, "status": "UP", "last_checked": datetime.now(timezone.utc).isoformat()},
+            {"id": "src_3", "name": "BBC", "latency_ms": 115, "status": "UP", "last_checked": datetime.now(timezone.utc).isoformat()},
+            {"id": "src_4", "name": "The Hindu", "latency_ms": 178, "status": "UP", "last_checked": datetime.now(timezone.utc).isoformat()},
+        ],
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+
+# --- Catch-all health ---
+@app.get("/api/v1/ping")
+async def ping():
+    return {"pong": True, "engine": "secura-lite-vercel", "timestamp": datetime.now(timezone.utc).isoformat()}
