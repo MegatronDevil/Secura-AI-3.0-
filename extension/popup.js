@@ -2,8 +2,8 @@
 // State-synchronized Chrome Extension Controller
 
 document.addEventListener("DOMContentLoaded", async () => {
-  let apiUrl = "http://127.0.0.1:8000";
-  let suiteUrl = "http://127.0.0.1:5173";
+  let apiUrl = "https://secura-ai-30-production.up.railway.app";
+  let suiteUrl = "https://secura-ai-3-0.vercel.app";
   let screeningTimerInterval = null;
 
   // Load configured settings

@@ -1,4 +1,4 @@
-let API_BASE_URL = "http://127.0.0.1:8000";
+let API_BASE_URL = "https://secura-ai-30-production.up.railway.app";
 
 // Dynamically load configured API URL from extension storage
 chrome.storage.local.get("secura_api_url", (data) => {
@@ -8,7 +8,7 @@ chrome.storage.local.get("secura_api_url", (data) => {
 });
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.secura_api_url) {
-    API_BASE_URL = changes.secura_api_url.newValue || "http://127.0.0.1:8000";
+    API_BASE_URL = changes.secura_api_url.newValue || "https://secura-ai-30-production.up.railway.app";
   }
 });
 
