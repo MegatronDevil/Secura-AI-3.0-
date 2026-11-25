@@ -335,7 +335,11 @@ async def analyze_image(
     
     # Mission 22: Consumer-First Canonical Binary Decision for Images
     # Multi-Layer Forensic Evidence Fusion across C2PA, SynthID, Container Metadata, and Neural Classifiers
-    neural_score = float(ai_detection_result.uncalibrated_margin) if (ai_detection_result and ai_detection_result.uncalibrated_margin is not None) else 0.50
+    neural_score = (
+        float(ai_detection_result.uncalibrated_margin)
+        if (ai_detection_result and ai_detection_result.uncalibrated_margin is not None and ai_detection_result.available)
+        else 0.15
+    )
     
     # Layer 1: C2PA Content Credentials Provenance
     c2pa_ai_certified = False
@@ -397,12 +401,6 @@ async def analyze_image(
         final_score = max(neural_score, 0.99)
         neural_note = f" Neural classifier corroboration: {neural_score*100:.1f}% synthetic likelihood."
         evidence_desc = "SynthID imperceptible watermark confirmed (Google Generative AI / DeepMind SynthID)." + neural_note
-    elif is_screenshot and neural_score >= 0.50:
-        is_img_ai = True
-        predicted_label = "AI_GENERATED"
-        display_label = "AI GENERATED (Screenshot / Neural Classifier Verified)"
-        final_score = neural_score
-        evidence_desc = f"Container metadata was stripped by screen capture. Secura's trained neural classifier inspected intrinsic pixel geometry and verified synthetic AI origin (AI Likelihood: {final_score*100:.1f}%)."
     elif meta_ai_indicated or (fn_ai_indicated and not is_hardware_camera):
         is_img_ai = True
         predicted_label = "AI_GENERATED"
@@ -423,7 +421,7 @@ async def analyze_image(
         final_score = min(neural_score, 0.15)
         sci_name = cm.scientific_software_name if cm else "Scientific Visualization Engine"
         evidence_desc = f"Authentic scientific plotting engine verified in container metadata ({sci_name}). Vector strokes and raster axes confirm legitimate code-rendered origin."
-    elif neural_score >= 0.50:
+    elif neural_score >= 0.60:
         is_img_ai = True
         predicted_label = "AI_GENERATED"
         display_label = "AI GENERATED SYNTHETIC"
@@ -436,7 +434,7 @@ async def analyze_image(
         display_label = "VERIFIED CAMERA CAPTURE"
         final_score = min(neural_score, 0.25)
         evidence_desc = f"Authentic camera hardware sensor verified: {hardware_camera_label}."
-    elif 0.45 <= neural_score < 0.50:
+    elif 0.45 <= neural_score < 0.60:
         is_img_ai = False
         predicted_label = "INCONCLUSIVE"
         display_label = "INCONCLUSIVE / AMBIGUOUS EVIDENCE"

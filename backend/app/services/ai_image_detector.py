@@ -598,76 +598,114 @@ class AIImageDetectorService:
                 logger.error("Ensemble inference error: %s", exc)
 
         # Path C: Extension-Specific Robust Image Detector (v1)
-        if self.active_head == "ExtensionImageDetectorV1" and self.backbone_loaded and self.clip_vision_model is not None:
-            if not self.extension_loaded:
-                self._load_extension_detector(self.weights_dir / "extension_image_detector_v1" / "model_weights.pt")
+        if self.active_head == "ExtensionImageDetectorV1":
+            if self.backbone_loaded and self.clip_vision_model is not None:
+                if not self.extension_loaded:
+                    self._load_extension_detector(self.weights_dir / "extension_image_detector_v1" / "model_weights.pt")
 
-            if self.extension_loaded and self.extension_head is not None:
+                if self.extension_loaded and self.extension_head is not None:
+                    t0 = time.time()
+                    try:
+                        rgb_img = image.convert("RGB")
+                        inputs = self.clip_processor(images=rgb_img, return_tensors="pt").to(self.device)
+                        with torch.no_grad():
+                            feats = self.clip_vision_model(**inputs).image_embeds[0].cpu().numpy()
+                        norm = np.linalg.norm(feats)
+                        if norm > 1e-8:
+                            feats = feats / norm
+
+                        feat_tensor = torch.tensor(feats, dtype=torch.float32).unsqueeze(0).to(self.device)
+                        with torch.no_grad():
+                            logit = float(self.extension_head(feat_tensor).item())
+                            p_raw_ai = float(torch.sigmoid(torch.tensor(logit)).item())
+
+                        # Foundational linear probe corroboration (ImageNet/COCO/Flickr baseline)
+                        _, c_margin, _, _ = self.compute_linear_probe(feats)
+
+                        # Dynamic Calibration: If foundational probe firmly asserts authentic camera capture (c_margin <= 0.38),
+                        # anchor consensus to protect against localized graphic/clothing/night-flash false positives on borderline scores:
+                        if c_margin <= 0.38 and 0.40 < p_raw_ai < 0.70:
+                            p_ai = float(0.20 * p_raw_ai + 0.80 * c_margin)
+                        elif (c_margin >= 0.60 or p_raw_ai >= 0.60):
+                            p_ai = float(max(p_raw_ai, c_margin))
+                        else:
+                            p_ai = float(0.50 * p_raw_ai + 0.50 * c_margin)
+
+                        thresh = self.extension_threshold
+                        is_ai = p_ai >= thresh
+                        is_inconclusive = abs(p_ai - thresh) < 0.05
+                        if is_inconclusive:
+                            predicted_class = "INCONCLUSIVE"
+                            decision = AIDetectionDecision.INCONCLUSIVE
+                        elif is_ai:
+                            predicted_class = "AI_GENERATED"
+                            decision = AIDetectionDecision.AI_GENERATED_CLASS
+                        else:
+                            predicted_class = "LIKELY_REAL"
+                            decision = AIDetectionDecision.REAL_IMAGE_CLASS
+
+                        p_human = float(1.0 - p_ai)
+                        latency_ms = round((time.time() - t0) * 1000, 2)
+
+                        return AIDetectorResult(
+                            available=True,
+                            inference_ready=True,
+                            model_name=self.model_name,
+                            model_version=self.model_version,
+                            model_status=AIDetectionStatus.LOADED,
+                            raw_score=round(logit, 4),
+                            uncalibrated_margin=round(p_ai, 4),
+                            score_semantics=f"Calibrated probability p_ai from robust web-compressed MLP head on CLIP ViT-L/14 representations (operating threshold: {thresh:.2f}).",
+                            predicted_class=predicted_class,
+                            decision_status=decision,
+                            probabilities={"artificial": round(p_ai, 4), "human": round(p_human, 4)},
+                            preprocessing="Bicubic resize to 224x224 with aspect-ratio preservation and CLIP channel normalization.",
+                            device_used=self.device,
+                            inference_latency_ms=latency_ms,
+                            limitations=[
+                                "Trained on web CDN compressions, JPEG artifacts, downscaling, and canvas exports.",
+                                "Isolated model designed specifically for Chrome Extension inference contracts."
+                            ],
+                        )
+                    except Exception as exc:
+                        logger.error("ExtensionImageDetectorV1 inference error: %s", exc)
+
+            # Resilient fallback: Swin AI-Image-Detector if CLIP backbone is offline
+            if self.swin_loaded and self.swin_model is not None:
                 t0 = time.time()
                 try:
                     rgb_img = image.convert("RGB")
-                    inputs = self.clip_processor(images=rgb_img, return_tensors="pt").to(self.device)
+                    inputs = self.swin_processor(images=rgb_img, return_tensors="pt").to(self.device)
                     with torch.no_grad():
-                        feats = self.clip_vision_model(**inputs).image_embeds[0].cpu().numpy()
-                    norm = np.linalg.norm(feats)
-                    if norm > 1e-8:
-                        feats = feats / norm
-
-                    feat_tensor = torch.tensor(feats, dtype=torch.float32).unsqueeze(0).to(self.device)
-                    with torch.no_grad():
-                        logit = float(self.extension_head(feat_tensor).item())
-                        p_raw_ai = float(torch.sigmoid(torch.tensor(logit)).item())
-
-                    # Foundational linear probe corroboration (ImageNet/COCO/Flickr baseline)
-                    _, c_margin, _, _ = self.compute_linear_probe(feats)
-
-                    # Dynamic Calibration: If foundational probe firmly asserts authentic camera capture (c_margin <= 0.38),
-                    # anchor consensus to protect against localized graphic/clothing/night-flash false positives on borderline scores:
-                    if c_margin <= 0.38 and 0.40 < p_raw_ai < 0.70:
-                        p_ai = float(0.20 * p_raw_ai + 0.80 * c_margin)
-                    elif (c_margin >= 0.60 or p_raw_ai >= 0.60):
-                        p_ai = float(max(p_raw_ai, c_margin))
-                    else:
-                        p_ai = float(0.50 * p_raw_ai + 0.50 * c_margin)
-
-                    thresh = self.extension_threshold
-                    is_ai = p_ai >= thresh
-                    is_inconclusive = abs(p_ai - thresh) < 0.05
-                    if is_inconclusive:
-                        predicted_class = "INCONCLUSIVE"
-                        decision = AIDetectionDecision.INCONCLUSIVE
-                    elif is_ai:
-                        predicted_class = "AI_GENERATED"
-                        decision = AIDetectionDecision.AI_GENERATED_CLASS
-                    else:
-                        predicted_class = "LIKELY_REAL"
-                        decision = AIDetectionDecision.REAL_IMAGE_CLASS
-
+                        outputs = self.swin_model(**inputs)
+                        diff = float(outputs.logits[0, 0] - outputs.logits[0, 1])
+                    p_ai = float(1.0 / (1.0 + np.exp(-diff)))
                     p_human = float(1.0 - p_ai)
+                    logit = float(diff)
                     latency_ms = round((time.time() - t0) * 1000, 2)
+                    is_ai = p_ai >= 0.50
+                    predicted_class = "AI_GENERATED" if is_ai else "LIKELY_REAL"
+                    decision = AIDetectionDecision.AI_GENERATED_CLASS if is_ai else AIDetectionDecision.REAL_IMAGE_CLASS
 
                     return AIDetectorResult(
                         available=True,
                         inference_ready=True,
-                        model_name=self.model_name,
-                        model_version=self.model_version,
+                        model_name="Swin AI-Image-Detector (Resilient Fallback)",
+                        model_version="1.2.0-swin",
                         model_status=AIDetectionStatus.LOADED,
                         raw_score=round(logit, 4),
                         uncalibrated_margin=round(p_ai, 4),
-                        score_semantics=f"Calibrated probability p_ai from robust web-compressed MLP head on CLIP ViT-L/14 representations (operating threshold: {thresh:.2f}).",
+                        score_semantics="Deep Vision Transformer (Swin architecture) fine-tuned on generative diffusion and synthetic imagery.",
                         predicted_class=predicted_class,
                         decision_status=decision,
                         probabilities={"artificial": round(p_ai, 4), "human": round(p_human, 4)},
-                        preprocessing="Bicubic resize to 224x224 with aspect-ratio preservation and CLIP channel normalization.",
+                        preprocessing="AutoImageProcessor standard resizing (224x224) and channel normalization.",
                         device_used=self.device,
                         inference_latency_ms=latency_ms,
-                        limitations=[
-                            "Trained on web CDN compressions, JPEG artifacts, downscaling, and canvas exports.",
-                            "Isolated model designed specifically for Chrome Extension inference contracts."
-                        ],
+                        limitations=MODEL_LIMITATIONS,
                     )
                 except Exception as exc:
-                    logger.error("ExtensionImageDetectorV1 inference error: %s", exc)
+                    logger.error("Swin fallback inference error: %s", exc)
 
         # Path D: Standard CLIP Linear Probe (UniversalFakeDetect or SecuraCustom)
         if self.backbone_loaded and self.clip_vision_model is not None:
@@ -705,7 +743,43 @@ class AIImageDetectorService:
             except Exception as exc:
                 logger.error("Genuine inference error: %s", exc)
 
-        # 3. Fallback when backbone is offline
+        # 3. Fallback when backbone is offline: utilize Swin transformer if available
+        if self.swin_loaded and self.swin_model is not None:
+            t0 = time.time()
+            try:
+                rgb_img = image.convert("RGB")
+                inputs = self.swin_processor(images=rgb_img, return_tensors="pt").to(self.device)
+                with torch.no_grad():
+                    outputs = self.swin_model(**inputs)
+                    diff = float(outputs.logits[0, 0] - outputs.logits[0, 1])
+                p_ai = float(1.0 / (1.0 + np.exp(-diff)))
+                p_human = float(1.0 - p_ai)
+                logit = float(diff)
+                latency_ms = round((time.time() - t0) * 1000, 2)
+                is_ai = p_ai >= 0.50
+                predicted_class = "AI_GENERATED" if is_ai else "LIKELY_REAL"
+                decision = AIDetectionDecision.AI_GENERATED_CLASS if is_ai else AIDetectionDecision.REAL_IMAGE_CLASS
+
+                return AIDetectorResult(
+                    available=True,
+                    inference_ready=True,
+                    model_name="Swin AI-Image-Detector (Resilient Fallback)",
+                    model_version="1.2.0-swin",
+                    model_status=AIDetectionStatus.LOADED,
+                    raw_score=round(logit, 4),
+                    uncalibrated_margin=round(p_ai, 4),
+                    score_semantics="Deep Vision Transformer (Swin architecture) fine-tuned on generative diffusion and synthetic imagery.",
+                    predicted_class=predicted_class,
+                    decision_status=decision,
+                    probabilities={"artificial": round(p_ai, 4), "human": round(p_human, 4)},
+                    preprocessing="AutoImageProcessor standard resizing (224x224) and channel normalization.",
+                    device_used=self.device,
+                    inference_latency_ms=latency_ms,
+                    limitations=MODEL_LIMITATIONS,
+                )
+            except Exception as exc:
+                logger.error("Swin fallback inference error: %s", exc)
+
         return AIDetectorResult(
             available=False,
             inference_ready=False,
