@@ -1,11 +1,20 @@
 let API_BASE_URL = "https://secura-ai-30-production.up.railway.app";
 
-// Dynamically load configured API URL from extension storage
+// Dynamically load and normalize configured API URL from extension storage
 chrome.storage.local.get("secura_api_url", (data) => {
   if (data && data.secura_api_url) {
-    API_BASE_URL = data.secura_api_url;
+    if (data.secura_api_url.includes("127.0.0.1:8000") || data.secura_api_url.includes("localhost:8000")) {
+      // Migrate legacy localhost setting to Railway cloud backend
+      API_BASE_URL = "https://secura-ai-30-production.up.railway.app";
+      chrome.storage.local.set({ secura_api_url: API_BASE_URL });
+    } else {
+      API_BASE_URL = data.secura_api_url;
+    }
+  } else {
+    chrome.storage.local.set({ secura_api_url: API_BASE_URL });
   }
 });
+
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes.secura_api_url) {
     API_BASE_URL = changes.secura_api_url.newValue || "https://secura-ai-30-production.up.railway.app";
@@ -439,18 +448,27 @@ async function performMediaInspection(tabId, targetUrl, clickedMediaInfo = null)
 
     let apiResp = null;
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s max timeout
       apiResp = await fetch(apiEndpoint, {
         method: "POST",
-        body: formData
+        body: formData,
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
     } catch (netErr) {
-      // Attempt localhost <-> 127.0.0.1 failover
-      if (apiEndpoint.includes("127.0.0.1:8000")) {
-        const altEndpoint = apiEndpoint.replace("127.0.0.1:8000", "localhost:8000");
-        apiResp = await fetch(altEndpoint, { method: "POST", body: formData });
-      } else if (apiEndpoint.includes("localhost:8000")) {
-        const altEndpoint = apiEndpoint.replace("localhost:8000", "127.0.0.1:8000");
-        apiResp = await fetch(altEndpoint, { method: "POST", body: formData });
+      // Automatic fallback to Railway cloud backend if current endpoint failed
+      if (!apiEndpoint.includes("secura-ai-30-production.up.railway.app")) {
+        console.warn("Local/custom backend failed, failing over to Railway cloud backend:", netErr);
+        const cloudEndpoint = apiEndpoint.replace(/https?:\/\/[^/]+/, "https://secura-ai-30-production.up.railway.app");
+        const cloudController = new AbortController();
+        const cloudTimeout = setTimeout(() => cloudController.abort(), 20000);
+        apiResp = await fetch(cloudEndpoint, {
+          method: "POST",
+          body: formData,
+          signal: cloudController.signal
+        });
+        clearTimeout(cloudTimeout);
       } else {
         throw netErr;
       }

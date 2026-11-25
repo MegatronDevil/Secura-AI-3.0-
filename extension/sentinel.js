@@ -1,13 +1,29 @@
 // Secura AI - Live Screen Sentinel Controller
 (() => {
-  let API_BASE_URL = "http://127.0.0.1:8000";
+  let API_BASE_URL = "https://secura-ai-30-production.up.railway.app";
 
-  // Load configured API URL
+  // Load configured API URL with auto-migration to cloud backend
+  function updateEngineStatusDisplay() {
+    const statusEl = document.getElementById("engineStatusText");
+    if (statusEl) {
+      const displayHost = API_BASE_URL.replace(/^https?:\/\//, "");
+      statusEl.textContent = `Backend Engine Connected (${displayHost})`;
+    }
+  }
+
   if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
     chrome.storage.local.get("secura_api_url", (data) => {
       if (data && data.secura_api_url) {
-        API_BASE_URL = data.secura_api_url;
+        if (data.secura_api_url.includes("127.0.0.1:8000") || data.secura_api_url.includes("localhost:8000")) {
+          API_BASE_URL = "https://secura-ai-30-production.up.railway.app";
+          chrome.storage.local.set({ secura_api_url: API_BASE_URL });
+        } else {
+          API_BASE_URL = data.secura_api_url;
+        }
+      } else {
+        chrome.storage.local.set({ secura_api_url: API_BASE_URL });
       }
+      updateEngineStatusDisplay();
     });
   }
 

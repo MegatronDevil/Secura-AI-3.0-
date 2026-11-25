@@ -1287,7 +1287,17 @@ Integrity Check: VALID`;
       fd.append("file", blob, "web_screen_frame.jpg");
       fd.append("frame", blob, "web_screen_frame.jpg");
 
-      const resp = await fetch("http://127.0.0.1:8000/api/v1/stream/liveness-frame", {
+      let streamApiUrl = "https://secura-ai-30-production.up.railway.app";
+      if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+        try {
+          const stored = await chrome.storage.local.get("secura_api_url");
+          if (stored && stored.secura_api_url && !stored.secura_api_url.includes("127.0.0.1") && !stored.secura_api_url.includes("localhost")) {
+            streamApiUrl = stored.secura_api_url;
+          }
+        } catch {}
+      }
+
+      const resp = await fetch(`${streamApiUrl}/api/v1/stream/liveness-frame`, {
         method: "POST",
         body: fd
       });
